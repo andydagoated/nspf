@@ -4,6 +4,9 @@ Nevada School Performance Framework (NSPF) - Middle School Star-Rating Engine
 Faithful implementation of the 2024-25 NSPF Manual (version 8-15-2025),
 NDE Office of Assessment, Data, and Accountability Management.
 
+Measure labels here match the line items on an official NSPF school rating
+report, so values read off a report map 1:1 onto this tool.
+
 Authoritative sources within the manual:
   Star cut scores ............ Table 2   (Section 1.2.2)
   Index formula .............. Section 1.2.2  (points earned / points possible x 100)
@@ -15,18 +18,24 @@ Authoritative sources within the manual:
   WIDA AGP PAT ............... Table 14
   Closing Opportunity Gaps ... Table 15
   Chronic Absenteeism PAT .... Table 16
+  CA Reduction PAT ........... Table 17  (see note below)
   Academic Learning Plans .... Table 18
   8th Grade Credits PAT ...... Table 19
 
-DELIBERATE OMISSIONS (require student-level data this tool does not take; documented
-so the fidelity claim stays honest):
+CHRONIC ABSENTEEISM (Section 5.1.5): the engine implements all three paths a
+school report shows -
+  1. the rate PAT (Table 16),
+  2. the +1 Incentive Point for a 10%+ reduction (Section 5.1.5.1), and
+  3. the Reduction-rate PAT alternative (Table 17), taking whichever is higher.
+The "reduction rate" is the percent decrease in the rate over the prior year,
+confirmed by NSPF school rating reports (e.g. a school dropping 42.5% -> 28.5%
+shows a 32.9% reduction earning 5 reduction-rate points). Paths 2 and 3 activate
+only when a prior-year rate is supplied.
+
+DELIBERATE OMISSIONS (require student-level data this tool does not take):
   - n-size sufficiency and multi-year pooling (Sections 1.2.1, 3.2)
   - CSI / TSI / ATSI school designations (Section 7)
   - Assessment participation warnings/penalties (Section 6)
-  - Chronic Absenteeism Reduction PAT (Table 17): the manual text does not give an
-    explicit "reduction rate" formula, so it is omitted pending NDE confirmation.
-    The Chronic Absenteeism Incentive Point (Section 5.1.5.1) IS implemented and
-    activates only when a prior-year rate is supplied.
 """
 
 from __future__ import annotations
@@ -45,10 +54,7 @@ def truncate_tenth(x: float) -> float:
 
 
 def pat_high(bands: list[tuple[float, float]], fallback: float) -> Callable[[float], float]:
-    """Higher-is-better Point Attribution Table.
-    `bands` = (threshold, points) in DESCENDING threshold order. The (truncated)
-    value earns the points of the first threshold it meets or exceeds; if it meets
-    none, it earns `fallback` (the table's bottom band)."""
+    """Higher-is-better Point Attribution Table; bands in DESCENDING threshold order."""
     def scorer(value: float) -> float:
         v = truncate_tenth(value)
         for thr, pts in bands:
@@ -59,9 +65,7 @@ def pat_high(bands: list[tuple[float, float]], fallback: float) -> Callable[[flo
 
 
 def pat_low(bands: list[tuple[float, float]], fallback: float) -> Callable[[float], float]:
-    """Lower-is-better PAT (chronic absenteeism).
-    `bands` = (threshold, points) in ASCENDING threshold order. The value earns the
-    points of the first threshold it falls below; if it falls below none, `fallback`."""
+    """Lower-is-better PAT (chronic absenteeism); bands in ASCENDING threshold order."""
     def scorer(value: float) -> float:
         v = truncate_tenth(value)
         for thr, pts in bands:
@@ -110,20 +114,29 @@ CA_BANDS = [(5, 10), (6, 9.5), (7, 9), (8, 8.5), (9, 8), (10, 7.5), (11, 7),  # 
             (18, 3.5), (19, 3), (20, 2.5), (21, 2), (22, 1.5), (23, 1), (24, 0.5)]
 PAT_ABSENTEEISM = pat_low(CA_BANDS, fallback=0)
 
+PAT_CA_REDUCTION = pat_high(                                                 # Table 17 (max 5)
+    [(25, 5), (22.5, 4.5), (20, 4), (17.5, 3.5), (15, 3), (12.5, 2.5),
+     (10, 2), (7.5, 1.5), (5, 1), (2.5, 0.5)], fallback=0)
+
 PAT_ALP = pat_high([(95, 2)], fallback=0)                                    # Table 18 (max 2; manual lists only >=95)
 
 PAT_CREDIT8 = pat_high([(90, 3), (75, 2), (60, 1)], fallback=0)              # Table 19 (max 3)
 
 
-def score_absenteeism(current: float, prior: Optional[float]) -> float:
-    """Chronic Absenteeism points (Table 16) plus the Incentive Point (5.1.5.1).
-    The incentive adds 1 point (capped at the 10-point max) when the current rate
-    is a 10%+ reduction over the prior year (current <= prior * 0.9). It only
-    applies when a prior-year rate is supplied."""
+def absenteeism_detail(current: float, prior: Optional[float]) -> tuple[float, str]:
+    """Chronic absenteeism points and the path used (rate / incentive / reduction)."""
     base = PAT_ABSENTEEISM(current)
-    if prior is not None and prior > 0 and truncate_tenth(current) <= prior * 0.9:
-        return min(10.0, base + 1.0)
-    return base
+    if prior is None or prior <= 0:
+        return base, "rate"
+    rate_points = base
+    incentive = truncate_tenth(current) <= prior * 0.9          # 10%+ reduction
+    if incentive:
+        rate_points = min(10.0, base + 1.0)                      # Incentive Point (5.1.5.1)
+    reduction_rate = truncate_tenth((prior - current) / prior * 100.0)
+    reduction_points = PAT_CA_REDUCTION(reduction_rate) if reduction_rate > 0 else 0.0
+    if reduction_points > rate_points:                           # take the higher (Table 17)
+        return reduction_points, f"reduction rate {reduction_rate}%"
+    return rate_points, ("rate + incentive" if incentive else "rate")
 
 
 # ------------------------------------------------------------------
@@ -139,38 +152,36 @@ def index_to_stars(index: float) -> int:
     return 1
 
 
-# Indicator weights (Table 10) - for reference/display
+# Indicator weights (Table 10), names matching the school rating report
 INDICATOR_WEIGHTS = {
     "Academic Achievement": 25,
-    "Growth": 30,
-    "English Learner Progress": 10,
+    "Student Growth": 30,
+    "English Language Proficiency": 10,
     "Closing Opportunity Gaps": 20,
     "Student Engagement": 15,
 }
 COMPONENT_ORDER = list(INDICATOR_WEIGHTS.keys())
-
-# Measures required for an all-students rating (Section 1.2; else "Not Rated")
 REQUIRED_FOR_RATING = ["pooled_proficiency", "math_mgp", "ela_mgp", "math_agp_pct", "ela_agp_pct"]
 
 
 # ------------------------------------------------------------------
-# Inputs
+# Inputs (field names mirror the report's measure lines)
 # ------------------------------------------------------------------
 
 @dataclass
 class MiddleSchoolInputs:
-    pooled_proficiency: Optional[float] = None      # combined Math+ELA+Science proficiency %
-    math_mgp: Optional[float] = None                # median growth percentile (1-99)
-    ela_mgp: Optional[float] = None
-    math_agp_pct: Optional[float] = None            # % meeting adequate growth
-    ela_agp_pct: Optional[float] = None
-    wida_agp_pct: Optional[float] = None            # % of ELs meeting WIDA AGP
-    math_gap_pct: Optional[float] = None            # Closing Opportunity Gaps, Math
-    ela_gap_pct: Optional[float] = None             # Closing Opportunity Gaps, ELA
-    chronic_absenteeism: Optional[float] = None     # % chronically absent (lower is better)
-    prior_chronic_absenteeism: Optional[float] = None   # optional: enables incentive point
-    alp_pct: Optional[float] = None                 # % of MS students with an Academic Learning Plan
-    credit8_pct: Optional[float] = None             # % of 8th graders meeting NAC 389 credits
+    pooled_proficiency: Optional[float] = None      # "Pooled Proficiency"
+    math_mgp: Optional[float] = None                # "Math MGP" (school median)
+    ela_mgp: Optional[float] = None                 # "ELA MGP"
+    math_agp_pct: Optional[float] = None            # "Met Math AGP Target"
+    ela_agp_pct: Optional[float] = None             # "Met ELA AGP Target"
+    wida_agp_pct: Optional[float] = None            # "Met EL AGP Target"
+    math_gap_pct: Optional[float] = None            # "Prior Non-Proficient Met Math AGP Target"
+    ela_gap_pct: Optional[float] = None             # "Prior Non-Proficient Met ELA AGP Target"
+    chronic_absenteeism: Optional[float] = None     # "Chronic Absenteeism" (current year)
+    prior_chronic_absenteeism: Optional[float] = None   # prior-year rate (enables incentive + reduction)
+    alp_pct: Optional[float] = None                 # "Academic Learning Plans"
+    credit8_pct: Optional[float] = None             # "8th Grade Credit Requirements"
 
 
 # ------------------------------------------------------------------
@@ -186,32 +197,34 @@ class Measure:
     value: Optional[float]
     earned: float
     applies: bool
+    note: str = ""
 
 
 def build_measures(inp: MiddleSchoolInputs) -> list[Measure]:
     spec = [
-        # key, label, component, max, value, scorer
-        ("pooled_proficiency", "Pooled proficiency", "Academic Achievement", 25, inp.pooled_proficiency, PAT_POOLED),
-        ("math_mgp", "Math MGP", "Growth", 10, inp.math_mgp, PAT_MGP),
-        ("ela_mgp", "ELA MGP", "Growth", 10, inp.ela_mgp, PAT_MGP),
-        ("math_agp_pct", "Math AGP", "Growth", 5, inp.math_agp_pct, PAT_AGP_MATH),
-        ("ela_agp_pct", "ELA AGP", "Growth", 5, inp.ela_agp_pct, PAT_AGP_ELA),
-        ("wida_agp_pct", "WIDA AGP", "English Learner Progress", 10, inp.wida_agp_pct, PAT_WIDA),
-        ("math_gap_pct", "Math closing gaps", "Closing Opportunity Gaps", 10, inp.math_gap_pct, PAT_GAP_MATH),
-        ("ela_gap_pct", "ELA closing gaps", "Closing Opportunity Gaps", 10, inp.ela_gap_pct, PAT_GAP_ELA),
+        ("pooled_proficiency", "Pooled Proficiency", "Academic Achievement", 25, inp.pooled_proficiency, PAT_POOLED),
+        ("math_mgp", "Math MGP", "Student Growth", 10, inp.math_mgp, PAT_MGP),
+        ("ela_mgp", "ELA MGP", "Student Growth", 10, inp.ela_mgp, PAT_MGP),
+        ("math_agp_pct", "Met Math AGP Target", "Student Growth", 5, inp.math_agp_pct, PAT_AGP_MATH),
+        ("ela_agp_pct", "Met ELA AGP Target", "Student Growth", 5, inp.ela_agp_pct, PAT_AGP_ELA),
+        ("wida_agp_pct", "Met EL AGP Target", "English Language Proficiency", 10, inp.wida_agp_pct, PAT_WIDA),
+        ("math_gap_pct", "Prior Non-Proficient Met Math AGP Target", "Closing Opportunity Gaps", 10, inp.math_gap_pct, PAT_GAP_MATH),
+        ("ela_gap_pct", "Prior Non-Proficient Met ELA AGP Target", "Closing Opportunity Gaps", 10, inp.ela_gap_pct, PAT_GAP_ELA),
         ("alp_pct", "Academic Learning Plans", "Student Engagement", 2, inp.alp_pct, PAT_ALP),
-        ("credit8_pct", "8th-grade credits", "Student Engagement", 3, inp.credit8_pct, PAT_CREDIT8),
+        ("credit8_pct", "8th Grade Credit Requirements", "Student Engagement", 3, inp.credit8_pct, PAT_CREDIT8),
     ]
     measures = []
     for key, label, comp, maxp, val, scorer in spec:
         applies = val is not None
         measures.append(Measure(key, label, comp, maxp, val, scorer(val) if applies else 0.0, applies))
 
-    # Chronic Absenteeism handled separately (optional incentive point)
     ca_applies = inp.chronic_absenteeism is not None
-    ca_earned = score_absenteeism(inp.chronic_absenteeism, inp.prior_chronic_absenteeism) if ca_applies else 0.0
-    measures.append(Measure("chronic_absenteeism", "Chronic absenteeism", "Student Engagement",
-                            10, inp.chronic_absenteeism, ca_earned, ca_applies))
+    if ca_applies:
+        ca_earned, ca_note = absenteeism_detail(inp.chronic_absenteeism, inp.prior_chronic_absenteeism)
+    else:
+        ca_earned, ca_note = 0.0, ""
+    measures.append(Measure("chronic_absenteeism", "Chronic Absenteeism", "Student Engagement",
+                            10, inp.chronic_absenteeism, ca_earned, ca_applies, ca_note))
     return measures
 
 
@@ -259,35 +272,35 @@ def compute(inp: MiddleSchoolInputs) -> Result:
 
 
 # ------------------------------------------------------------------
-# Demo / self-check
+# Built-in validation: Carroll M Johnston STEM Academy (Clark, 2024-25)
+# Official report: AA 6, Growth 16.5, EL 10, Gaps 10, Engagement 9 -> 51.5, 3 stars.
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
-    sample = MiddleSchoolInputs(
-        pooled_proficiency=38,
-        math_mgp=47, ela_mgp=52,
-        math_agp_pct=38, ela_agp_pct=44,
-        wida_agp_pct=30,
-        math_gap_pct=16, ela_gap_pct=24,
-        chronic_absenteeism=18,
-        alp_pct=96,
-        credit8_pct=80,
+    carroll = MiddleSchoolInputs(
+        pooled_proficiency=26.2,
+        math_mgp=56, ela_mgp=51,
+        math_agp_pct=21, ela_agp_pct=39.9,
+        wida_agp_pct=37.5,
+        math_gap_pct=11.7, ela_gap_pct=26.6,
+        chronic_absenteeism=28.5, prior_chronic_absenteeism=42.5,
+        alp_pct=95,            # report shows ">95"
+        credit8_pct=81.8,
     )
-    r = compute(sample)
-    print("=" * 60)
-    print("NSPF MIDDLE SCHOOL - 2024-25 framework (manual v8-15-2025)")
-    print("=" * 60)
-    print(f"Index: {r.index} / 100   ->   {r.stars} star(s)"
-          f"{'' if r.rated else '   [NOT RATED - missing required measures]'}")
-    print(f"Points earned: {r.earned} of {r.possible} possible")
-    if r.next_star:
-        print(f"Index points to {r.next_star} stars: {r.points_to_next}")
-    print("-" * 60)
+    r = compute(carroll)
+    expected = {"Academic Achievement": 6.0, "Student Growth": 16.5,
+                "English Language Proficiency": 10.0, "Closing Opportunity Gaps": 10.0,
+                "Student Engagement": 9.0}
+    print("VALIDATION - Carroll M Johnston STEM Academy (official: 51.5 / 3 stars)")
+    print(f"  Computed index: {r.index}  stars: {r.stars}  rated: {r.rated}")
+    ok = abs(r.index - 51.5) < 1e-9 and r.stars == 3
     for comp in COMPONENT_ORDER:
-        if comp in r.by_component:
-            c = r.by_component[comp]
-            print(f"  {comp:<26} {c['earned']:5.1f} / {c['possible']:5.1f}")
-    print("-" * 60)
-    for m in r.measures:
-        detail = f"{m.earned:5.1f} / {m.max_points:4.1f}  (rate {m.value})" if m.applies else "  not reported"
-        print(f"  {m.label:<24} {detail}")
+        got = round(r.by_component[comp]["earned"], 1)
+        want = expected[comp]
+        flag = "OK " if abs(got - want) < 1e-9 else "FAIL"
+        if abs(got - want) >= 1e-9:
+            ok = False
+        print(f"  {flag} {comp:<30} {got} / {r.by_component[comp]['possible']}  (official {want})")
+    ca = next(m for m in r.measures if m.key == "chronic_absenteeism")
+    print(f"  Chronic absenteeism path: {ca.note}  ->  {ca.earned} pts")
+    print("RESULT:", "ALL MATCH OFFICIAL REPORT" if ok else "MISMATCH")
