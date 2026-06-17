@@ -1,4 +1,4 @@
-[README (3).md](https://github.com/user-attachments/files/29069735/README.3.md)
+[README (4).md](https://github.com/user-attachments/files/29070087/README.4.md)
 # NSPF Middle School Star-Rating Estimator
 
 A web app that estimates a Nevada middle school's **Total Index Score (0–100)** and
@@ -68,8 +68,14 @@ designations (§7); and assessment participation penalties (§6).
 |------|---------|
 | `app.py` | Streamlit user interface |
 | `nspf_middle_school.py` | Scoring engine (Point Attribution Tables + validation self-test) |
+| `METHODOLOGY.md` | Plain-language methodology — rendered on the app page and linkable |
 | `requirements.txt` | Python dependencies |
 | `.gitignore` | Standard Python/Streamlit ignores |
+
+The app shows a fidelity statement and renders `METHODOLOGY.md` directly on the
+page (in an expander), plus a shareable link. The link target is set by the
+`METHODOLOGY_URL` constant near the top of `app.py` — update it to your repo path
+(default points at `METHODOLOGY.md` on the `main` branch).
 
 ## Run locally
 
