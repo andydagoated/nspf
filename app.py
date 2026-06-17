@@ -76,8 +76,8 @@ cfg = NSPFConfig(
 def indicator(label, default, minv=0.0, maxv=100.0, step=1.0, help=None):
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        val = st.number_input(label, min_value=minv, max_value=maxv,
-                              value=float(default), step=step, help=help)
+        val = st.number_input(label, min_value=float(minv), max_value=float(maxv),
+                              value=float(default), step=float(step), help=help)
     with col_b:
         st.write("")  # vertical nudge
         reported = st.checkbox("Reported", value=True, key=f"rep_{label}")
