@@ -1,290 +1,293 @@
 """
-Nevada School Performance Framework (NSPF) - Middle School Star-Rating Calculator
-=================================================================================
+Nevada School Performance Framework (NSPF) - Middle School Star-Rating Engine
+=============================================================================
+Faithful implementation of the 2024-25 NSPF Manual (version 8-15-2025),
+NDE Office of Assessment, Data, and Accountability Management.
 
-This module computes a middle school's NSPF index (0-100) and star rating (1-5)
-from its raw indicator values. It is the DETERMINISTIC core of a larger
-prediction pipeline: forecast the indicator inputs separately, then run them
-through this engine.
+Authoritative sources within the manual:
+  Star cut scores ............ Table 2   (Section 1.2.2)
+  Index formula .............. Section 1.2.2  (points earned / points possible x 100)
+  Truncation rule ............ Section 1.3   (rates truncated, not rounded, to the tenth)
+  Measure weights ............ Table 10  (Section 5.2)
+  Pooled Proficiency PAT ..... Table 11
+  Math/ELA MGP PAT ........... Table 12
+  Math/ELA AGP PAT ........... Table 13
+  WIDA AGP PAT ............... Table 14
+  Closing Opportunity Gaps ... Table 15
+  Chronic Absenteeism PAT .... Table 16
+  Academic Learning Plans .... Table 18
+  8th Grade Credits PAT ...... Table 19
 
--------------------------------------------------------------------------------
-!!  READ BEFORE USING  !!
--------------------------------------------------------------------------------
-The NDE revises NSPF point allocations, indicator scoring rubrics, and star
-cut scores periodically. EVERY number in the CONFIG section below is an
-ILLUSTRATIVE PLACEHOLDER based on the framework's general historical structure.
-You MUST replace them with the exact values from the official NDE NSPF technical
-guide for the school year you are predicting.
-
-Validation gate: before trusting any projection, feed in last year's ACTUAL
-published indicator values for a batch of real middle schools (from the Nevada
-Report Card / accountability portal) and confirm this engine reproduces their
-published star ratings. If it doesn't match, the CONFIG is wrong.
--------------------------------------------------------------------------------
-
-Design notes:
-- The index is computed as (points earned / points possible) * 100. This handles
-  schools that are missing an indicator (e.g., a small charter with too few
-  English learners to report) by dropping that indicator from BOTH earned and
-  possible, rather than forcing a fixed denominator. Confirm this matches the
-  official reweighting / minimum-N rules for your year.
-- Each indicator's scorer returns a FRACTION in [0, 1] of its max points. Swap
-  in the official rubric (proportional, banded thresholds, etc.) per indicator.
+DELIBERATE OMISSIONS (require student-level data this tool does not take; documented
+so the fidelity claim stays honest):
+  - n-size sufficiency and multi-year pooling (Sections 1.2.1, 3.2)
+  - CSI / TSI / ATSI school designations (Section 7)
+  - Assessment participation warnings/penalties (Section 6)
+  - Chronic Absenteeism Reduction PAT (Table 17): the manual text does not give an
+    explicit "reduction rate" formula, so it is omitted pending NDE confirmation.
+    The Chronic Absenteeism Incentive Point (Section 5.1.5.1) IS implemented and
+    activates only when a prior-year rate is supplied.
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+import math
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 
-# ============================================================
-# 1. SCORING PRIMITIVES
-#    Each returns a fraction in [0, 1] of an indicator's max points.
-#    Replace with the official NSPF rubric for each indicator.
-# ============================================================
+# ------------------------------------------------------------------
+# Scoring primitives
+# ------------------------------------------------------------------
 
-def linear_fraction(floor: float, ceiling: float, higher_is_better: bool = True
-                    ) -> Callable[[float], float]:
-    """Proportional credit between a floor (0 pts) and ceiling (full pts)."""
+def truncate_tenth(x: float) -> float:
+    """Truncate (not round) to the tenth, per Section 1.3.  59.99 -> 59.9."""
+    return math.floor(x * 10) / 10.0
+
+
+def pat_high(bands: list[tuple[float, float]], fallback: float) -> Callable[[float], float]:
+    """Higher-is-better Point Attribution Table.
+    `bands` = (threshold, points) in DESCENDING threshold order. The (truncated)
+    value earns the points of the first threshold it meets or exceeds; if it meets
+    none, it earns `fallback` (the table's bottom band)."""
     def scorer(value: float) -> float:
-        if ceiling == floor:
-            return 1.0
-        frac = (value - floor) / (ceiling - floor)
-        if not higher_is_better:
-            frac = 1.0 - frac
-        return max(0.0, min(1.0, frac))
+        v = truncate_tenth(value)
+        for thr, pts in bands:
+            if v >= thr:
+                return pts
+        return fallback
     return scorer
 
 
-def band_fraction(bands: list[tuple[float, float]], higher_is_better: bool = True
-                 ) -> Callable[[float], float]:
-    """
-    Threshold bands. `bands` = list of (threshold, fraction), evaluated in order.
-    For higher_is_better, the first band whose threshold the value meets/exceeds
-    wins. NSPF frequently uses banded cut points like this.
-    """
-    ordered = sorted(bands, key=lambda b: b[0], reverse=higher_is_better)
+def pat_low(bands: list[tuple[float, float]], fallback: float) -> Callable[[float], float]:
+    """Lower-is-better PAT (chronic absenteeism).
+    `bands` = (threshold, points) in ASCENDING threshold order. The value earns the
+    points of the first threshold it falls below; if it falls below none, `fallback`."""
     def scorer(value: float) -> float:
-        for threshold, frac in ordered:
-            if (higher_is_better and value >= threshold) or \
-               (not higher_is_better and value <= threshold):
-                return frac
-        return 0.0
+        v = truncate_tenth(value)
+        for thr, pts in bands:
+            if v < thr:
+                return pts
+        return fallback
     return scorer
 
 
-# ============================================================
-# 2. RAW INPUTS
-#    A middle school's indicator values for one year.
-#    Use None for any indicator that does not apply / is suppressed by min-N.
-# ============================================================
+# ------------------------------------------------------------------
+# Point Attribution Tables - 2024-25 Middle School (verbatim from the manual)
+# ------------------------------------------------------------------
 
-@dataclass
-class MiddleSchoolInputs:
-    # --- Academic Achievement (proficiency rates, % of students proficient) ---
-    ela_proficiency: Optional[float] = None        # 0-100
-    math_proficiency: Optional[float] = None        # 0-100
-    science_proficiency: Optional[float] = None      # 0-100
+PAT_POOLED = pat_high(                                                       # Table 11 (max 25)
+    [(56, 25), (55, 24), (54, 23), (52, 22), (50, 21), (48, 20), (46, 19),
+     (44, 18), (42, 17), (41, 16), (40, 15), (39, 14), (37, 13), (36, 12),
+     (34, 11), (32, 10), (30, 9), (28, 8), (27, 7), (26, 6), (25, 5),
+     (24, 4), (23, 3), (22, 2)], fallback=1)
 
-    # --- Student Growth (Median Growth Percentile, 1-99) ---
-    ela_mgp: Optional[float] = None                  # 1-99
-    math_mgp: Optional[float] = None                 # 1-99
-    # Adequate Growth Percentile: % of students meeting their growth target
-    ela_agp_pct: Optional[float] = None              # 0-100
-    math_agp_pct: Optional[float] = None             # 0-100
+PAT_MGP = pat_high(                                                          # Table 12 (max 10; Math & ELA identical)
+    [(65, 10), (61, 9), (58, 8), (54, 7), (51, 6), (48, 5), (44, 4),
+     (40, 3), (35, 2)], fallback=1)
 
-    # --- English Learner Progress (% making progress toward proficiency) ---
-    el_progress: Optional[float] = None              # 0-100
+PAT_AGP_MATH = pat_high(                                                     # Table 13 Math (max 5)
+    [(42, 5), (39, 4.5), (35, 4), (31, 3.5), (27, 3), (24, 2.5), (21, 2),
+     (18, 1.5), (15, 1)], fallback=0.5)
 
-    # --- Closing Opportunity Gaps ---
-    # Stand-in for the gap-closing measure (e.g., growth of the lowest quartile
-    # or prior-non-proficient students). Confirm the exact official definition.
-    opportunity_gap_index: Optional[float] = None    # 0-100
+PAT_AGP_ELA = pat_high(                                                      # Table 13 ELA (max 5)
+    [(61, 5), (58, 4.5), (55, 4), (51, 3.5), (48, 3), (45, 2.5), (41, 2),
+     (37, 1.5), (32, 1)], fallback=0.5)
 
-    # --- Student Engagement ---
-    chronic_absenteeism: Optional[float] = None      # 0-100, LOWER is better
-    climate_survey: Optional[float] = None           # 0-100, optional
+PAT_WIDA = pat_high(                                                         # Table 14 (max 10)
+    [(36, 10), (32, 9), (29, 8), (26, 7), (23, 6), (20, 5), (18, 4),
+     (16, 3), (13, 2)], fallback=1)
 
+PAT_GAP_MATH = pat_high(                                                     # Table 15 Math (max 10)
+    [(24, 10), (21, 9), (19, 8), (17, 7), (15, 6), (13, 5), (11, 4),
+     (10, 3), (8, 2)], fallback=1)
 
-# ============================================================
-# 3. CONFIG  --  *** ALL PLACEHOLDERS: VERIFY AGAINST NDE GUIDE ***
-# ============================================================
+PAT_GAP_ELA = pat_high(                                                      # Table 15 ELA (max 10)
+    [(34, 10), (32, 9), (30, 8), (28, 7), (26, 6), (24, 5), (22, 4),
+     (19, 3), (16, 2)], fallback=1)
 
-@dataclass
-class NSPFConfig:
-    # ---- Max points per indicator (must reflect official weights) ----
-    # Historical MS structure sums to ~100 across these five components.
-    pts_ela_proficiency: float = 10.0
-    pts_math_proficiency: float = 10.0
-    pts_science_proficiency: float = 10.0          # Achievement subtotal ~30
+CA_BANDS = [(5, 10), (6, 9.5), (7, 9), (8, 8.5), (9, 8), (10, 7.5), (11, 7),  # Table 16 (max 10)
+            (12, 6.5), (13, 6), (14, 5.5), (15, 5), (16, 4.5), (17, 4),
+            (18, 3.5), (19, 3), (20, 2.5), (21, 2), (22, 1.5), (23, 1), (24, 0.5)]
+PAT_ABSENTEEISM = pat_low(CA_BANDS, fallback=0)
 
-    pts_ela_mgp: float = 7.5
-    pts_math_mgp: float = 7.5
-    pts_ela_agp: float = 7.5
-    pts_math_agp: float = 7.5                       # Growth subtotal ~30
+PAT_ALP = pat_high([(95, 2)], fallback=0)                                    # Table 18 (max 2; manual lists only >=95)
 
-    pts_el_progress: float = 10.0                   # EL subtotal ~10
-
-    pts_opportunity_gap: float = 20.0              # Gap subtotal ~20
-
-    pts_chronic_absenteeism: float = 7.5
-    pts_climate_survey: float = 2.5                # Engagement subtotal ~10
-
-    # ---- Star cut scores on the 0-100 index (lower bound, inclusive) ----
-    # PLACEHOLDERS. Replace with official cut scores for your year.
-    star_cuts: list[tuple[int, float]] = field(default_factory=lambda: [
-        (5, 82.0),
-        (4, 65.0),
-        (3, 50.0),
-        (2, 27.0),
-        (1, 0.0),
-    ])
-
-    # ---- Per-indicator scoring rubrics (fraction of max points earned) ----
-    # PLACEHOLDERS. Replace each with the official rubric.
-    def scorers(self) -> dict[str, Callable[[float], float]]:
-        return {
-            "ela_proficiency":     linear_fraction(0, 100),
-            "math_proficiency":    linear_fraction(0, 100),
-            "science_proficiency": linear_fraction(0, 100),
-            "ela_mgp":             linear_fraction(35, 65),   # MGP ~50 = median
-            "math_mgp":            linear_fraction(35, 65),
-            "ela_agp_pct":         linear_fraction(0, 100),
-            "math_agp_pct":        linear_fraction(0, 100),
-            "el_progress":         linear_fraction(0, 100),
-            "opportunity_gap_index": linear_fraction(0, 100),
-            # chronic absenteeism: lower is better, banded as an example
-            "chronic_absenteeism": band_fraction(
-                [(10, 1.0), (15, 0.75), (20, 0.5), (30, 0.25)],
-                higher_is_better=False),
-            "climate_survey":      linear_fraction(0, 100),
-        }
+PAT_CREDIT8 = pat_high([(90, 3), (75, 2), (60, 1)], fallback=0)              # Table 19 (max 3)
 
 
-# ============================================================
-# 4. INDICATOR ASSEMBLY
-# ============================================================
-
-@dataclass
-class Indicator:
-    name: str
-    component: str
-    value: Optional[float]
-    max_points: float
-    scorer: Callable[[float], float]
-
-    @property
-    def applies(self) -> bool:
-        return self.value is not None
-
-    @property
-    def earned(self) -> float:
-        return 0.0 if not self.applies else self.max_points * self.scorer(self.value)
+def score_absenteeism(current: float, prior: Optional[float]) -> float:
+    """Chronic Absenteeism points (Table 16) plus the Incentive Point (5.1.5.1).
+    The incentive adds 1 point (capped at the 10-point max) when the current rate
+    is a 10%+ reduction over the prior year (current <= prior * 0.9). It only
+    applies when a prior-year rate is supplied."""
+    base = PAT_ABSENTEEISM(current)
+    if prior is not None and prior > 0 and truncate_tenth(current) <= prior * 0.9:
+        return min(10.0, base + 1.0)
+    return base
 
 
-def build_indicators(inp: MiddleSchoolInputs, cfg: NSPFConfig) -> list[Indicator]:
-    s = cfg.scorers()
-    spec = [
-        # name, component, value, max_points, scorer_key
-        ("ela_proficiency",     "Academic Achievement", inp.ela_proficiency,    cfg.pts_ela_proficiency,     "ela_proficiency"),
-        ("math_proficiency",    "Academic Achievement", inp.math_proficiency,   cfg.pts_math_proficiency,    "math_proficiency"),
-        ("science_proficiency", "Academic Achievement", inp.science_proficiency,cfg.pts_science_proficiency, "science_proficiency"),
-        ("ela_mgp",             "Growth",               inp.ela_mgp,            cfg.pts_ela_mgp,             "ela_mgp"),
-        ("math_mgp",            "Growth",               inp.math_mgp,           cfg.pts_math_mgp,            "math_mgp"),
-        ("ela_agp_pct",         "Growth",               inp.ela_agp_pct,        cfg.pts_ela_agp,             "ela_agp_pct"),
-        ("math_agp_pct",        "Growth",               inp.math_agp_pct,       cfg.pts_math_agp,            "math_agp_pct"),
-        ("el_progress",         "English Learner",      inp.el_progress,        cfg.pts_el_progress,         "el_progress"),
-        ("opportunity_gap_index","Closing Opportunity Gaps", inp.opportunity_gap_index, cfg.pts_opportunity_gap, "opportunity_gap_index"),
-        ("chronic_absenteeism", "Student Engagement",   inp.chronic_absenteeism,cfg.pts_chronic_absenteeism, "chronic_absenteeism"),
-        ("climate_survey",      "Student Engagement",   inp.climate_survey,     cfg.pts_climate_survey,      "climate_survey"),
-    ]
-    return [Indicator(n, comp, val, mp, s[key]) for (n, comp, val, mp, key) in spec]
+# ------------------------------------------------------------------
+# Star ratings - Table 2 (Middle School)
+# ------------------------------------------------------------------
 
+STAR_CUTS = [(5, 80.0), (4, 70.0), (3, 50.0), (2, 29.0), (1, 0.0)]
 
-# ============================================================
-# 5. TOTAL + STAR MAPPING + RESULT
-# ============================================================
-
-def index_to_stars(index: float, cfg: NSPFConfig) -> int:
-    for stars, lower in sorted(cfg.star_cuts, key=lambda c: c[1], reverse=True):
+def index_to_stars(index: float) -> int:
+    for stars, lower in STAR_CUTS:
         if index >= lower:
             return stars
     return 1
+
+
+# Indicator weights (Table 10) - for reference/display
+INDICATOR_WEIGHTS = {
+    "Academic Achievement": 25,
+    "Growth": 30,
+    "English Learner Progress": 10,
+    "Closing Opportunity Gaps": 20,
+    "Student Engagement": 15,
+}
+COMPONENT_ORDER = list(INDICATOR_WEIGHTS.keys())
+
+# Measures required for an all-students rating (Section 1.2; else "Not Rated")
+REQUIRED_FOR_RATING = ["pooled_proficiency", "math_mgp", "ela_mgp", "math_agp_pct", "ela_agp_pct"]
+
+
+# ------------------------------------------------------------------
+# Inputs
+# ------------------------------------------------------------------
+
+@dataclass
+class MiddleSchoolInputs:
+    pooled_proficiency: Optional[float] = None      # combined Math+ELA+Science proficiency %
+    math_mgp: Optional[float] = None                # median growth percentile (1-99)
+    ela_mgp: Optional[float] = None
+    math_agp_pct: Optional[float] = None            # % meeting adequate growth
+    ela_agp_pct: Optional[float] = None
+    wida_agp_pct: Optional[float] = None            # % of ELs meeting WIDA AGP
+    math_gap_pct: Optional[float] = None            # Closing Opportunity Gaps, Math
+    ela_gap_pct: Optional[float] = None             # Closing Opportunity Gaps, ELA
+    chronic_absenteeism: Optional[float] = None     # % chronically absent (lower is better)
+    prior_chronic_absenteeism: Optional[float] = None   # optional: enables incentive point
+    alp_pct: Optional[float] = None                 # % of MS students with an Academic Learning Plan
+    credit8_pct: Optional[float] = None             # % of 8th graders meeting NAC 389 credits
+
+
+# ------------------------------------------------------------------
+# Measures and computation
+# ------------------------------------------------------------------
+
+@dataclass
+class Measure:
+    key: str
+    label: str
+    component: str
+    max_points: float
+    value: Optional[float]
+    earned: float
+    applies: bool
+
+
+def build_measures(inp: MiddleSchoolInputs) -> list[Measure]:
+    spec = [
+        # key, label, component, max, value, scorer
+        ("pooled_proficiency", "Pooled proficiency", "Academic Achievement", 25, inp.pooled_proficiency, PAT_POOLED),
+        ("math_mgp", "Math MGP", "Growth", 10, inp.math_mgp, PAT_MGP),
+        ("ela_mgp", "ELA MGP", "Growth", 10, inp.ela_mgp, PAT_MGP),
+        ("math_agp_pct", "Math AGP", "Growth", 5, inp.math_agp_pct, PAT_AGP_MATH),
+        ("ela_agp_pct", "ELA AGP", "Growth", 5, inp.ela_agp_pct, PAT_AGP_ELA),
+        ("wida_agp_pct", "WIDA AGP", "English Learner Progress", 10, inp.wida_agp_pct, PAT_WIDA),
+        ("math_gap_pct", "Math closing gaps", "Closing Opportunity Gaps", 10, inp.math_gap_pct, PAT_GAP_MATH),
+        ("ela_gap_pct", "ELA closing gaps", "Closing Opportunity Gaps", 10, inp.ela_gap_pct, PAT_GAP_ELA),
+        ("alp_pct", "Academic Learning Plans", "Student Engagement", 2, inp.alp_pct, PAT_ALP),
+        ("credit8_pct", "8th-grade credits", "Student Engagement", 3, inp.credit8_pct, PAT_CREDIT8),
+    ]
+    measures = []
+    for key, label, comp, maxp, val, scorer in spec:
+        applies = val is not None
+        measures.append(Measure(key, label, comp, maxp, val, scorer(val) if applies else 0.0, applies))
+
+    # Chronic Absenteeism handled separately (optional incentive point)
+    ca_applies = inp.chronic_absenteeism is not None
+    ca_earned = score_absenteeism(inp.chronic_absenteeism, inp.prior_chronic_absenteeism) if ca_applies else 0.0
+    measures.append(Measure("chronic_absenteeism", "Chronic absenteeism", "Student Engagement",
+                            10, inp.chronic_absenteeism, ca_earned, ca_applies))
+    return measures
 
 
 @dataclass
 class Result:
     index: float
     stars: int
+    rated: bool
+    missing_required: list[str]
     earned: float
     possible: float
     by_component: dict[str, dict[str, float]]
-    by_indicator: list[Indicator]
-    points_to_next_star: Optional[float]
+    measures: list[Measure]
     next_star: Optional[int]
+    points_to_next: Optional[float]
 
 
-def compute(inp: MiddleSchoolInputs, cfg: Optional[NSPFConfig] = None) -> Result:
-    cfg = cfg or NSPFConfig()
-    indicators = build_indicators(inp, cfg)
-    applied = [i for i in indicators if i.applies]
+def compute(inp: MiddleSchoolInputs) -> Result:
+    measures = build_measures(inp)
+    applied = [m for m in measures if m.applies]
 
-    earned = sum(i.earned for i in applied)
-    possible = sum(i.max_points for i in applied)
-    index = (earned / possible * 100.0) if possible else 0.0
-    stars = index_to_stars(index, cfg)
+    earned = sum(m.earned for m in applied)
+    possible = sum(m.max_points for m in applied)
+    index = round(earned / possible * 100.0, 1) if possible else 0.0
+    stars = index_to_stars(index)
 
-    # component breakdown
+    present = {m.key for m in applied}
+    missing_required = [k for k in REQUIRED_FOR_RATING if k not in present]
+    rated = len(missing_required) == 0
+
     comp: dict[str, dict[str, float]] = {}
-    for i in applied:
-        c = comp.setdefault(i.component, {"earned": 0.0, "possible": 0.0})
-        c["earned"] += i.earned
-        c["possible"] += i.max_points
+    for m in applied:
+        c = comp.setdefault(m.component, {"earned": 0.0, "possible": 0.0})
+        c["earned"] += m.earned
+        c["possible"] += m.max_points
 
-    # distance to next star (in index points)
-    higher = sorted([(s, l) for s, l in cfg.star_cuts if s > stars], key=lambda c: c[1])
+    higher = [(s, l) for s, l in STAR_CUTS if s > stars]
     next_star, pts_to_next = (None, None)
     if higher:
-        next_star, lower = higher[0]
-        pts_to_next = round(lower - index, 2)
+        next_star, lower = min(higher, key=lambda x: x[1])
+        pts_to_next = round(lower - index, 1)
 
-    return Result(round(index, 2), stars, round(earned, 2), round(possible, 2),
-                  comp, indicators, pts_to_next, next_star)
+    return Result(index, stars, rated, missing_required, round(earned, 1), round(possible, 1),
+                  comp, measures, next_star, pts_to_next)
 
 
-# ============================================================
-# 6. DEMO  (run:  python nspf_middle_school.py)
-# ============================================================
+# ------------------------------------------------------------------
+# Demo / self-check
+# ------------------------------------------------------------------
 
 if __name__ == "__main__":
     sample = MiddleSchoolInputs(
-        ela_proficiency=48,
-        math_proficiency=35,
-        science_proficiency=40,
-        ela_mgp=52,
-        math_mgp=47,
-        ela_agp_pct=44,
-        math_agp_pct=38,
-        el_progress=55,
-        opportunity_gap_index=46,
-        chronic_absenteeism=18,   # lower is better
-        climate_survey=70,
+        pooled_proficiency=38,
+        math_mgp=47, ela_mgp=52,
+        math_agp_pct=38, ela_agp_pct=44,
+        wida_agp_pct=30,
+        math_gap_pct=16, ela_gap_pct=24,
+        chronic_absenteeism=18,
+        alp_pct=96,
+        credit8_pct=80,
     )
-
     r = compute(sample)
     print("=" * 60)
-    print("NSPF MIDDLE SCHOOL — ILLUSTRATIVE OUTPUT (placeholder config)")
+    print("NSPF MIDDLE SCHOOL - 2024-25 framework (manual v8-15-2025)")
     print("=" * 60)
-    print(f"Index: {r.index} / 100   ->   {r.stars} star(s)")
+    print(f"Index: {r.index} / 100   ->   {r.stars} star(s)"
+          f"{'' if r.rated else '   [NOT RATED - missing required measures]'}")
     print(f"Points earned: {r.earned} of {r.possible} possible")
     if r.next_star:
-        print(f"Distance to {r.next_star} stars: {r.points_to_next_star} index points")
+        print(f"Index points to {r.next_star} stars: {r.points_to_next}")
     print("-" * 60)
-    print("Component breakdown:")
-    for name, c in r.by_component.items():
-        pct = c["earned"] / c["possible"] * 100 if c["possible"] else 0
-        print(f"  {name:<26} {c['earned']:5.1f} / {c['possible']:5.1f}  ({pct:4.0f}%)")
+    for comp in COMPONENT_ORDER:
+        if comp in r.by_component:
+            c = r.by_component[comp]
+            print(f"  {comp:<26} {c['earned']:5.1f} / {c['possible']:5.1f}")
     print("-" * 60)
-    print("Indicator detail (earned / max):")
-    for i in r.by_indicator:
-        status = f"{i.earned:5.2f} / {i.max_points:4.1f}" if i.applies else "  -- not applied --"
-        print(f"  {i.name:<24} {status}")
+    for m in r.measures:
+        detail = f"{m.earned:5.1f} / {m.max_points:4.1f}  (rate {m.value})" if m.applies else "  not reported"
+        print(f"  {m.label:<24} {detail}")
