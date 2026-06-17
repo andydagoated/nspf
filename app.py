@@ -8,6 +8,7 @@ Run locally:   streamlit run app.py
 Deploy:        push to GitHub, then deploy on Streamlit Community Cloud (main file: app.py)
 """
 
+from pathlib import Path
 import streamlit as st
 from nspf_middle_school import (
     MiddleSchoolInputs, compute, INDICATOR_WEIGHTS, COMPONENT_ORDER, REQUIRED_FOR_RATING,
@@ -23,6 +24,28 @@ st.info(
     "exactly as it appears on the report. **Use only aggregate, school-level numbers** — "
     "never individual student data. This is an estimate, not an official NDE rating."
 )
+
+# URL of the methodology document (e.g. METHODOLOGY.md in your GitHub repo).
+# Update this if your repository path differs.
+METHODOLOGY_URL = "https://github.com/andydagoated/nspf/blob/main/METHODOLOGY.md"
+
+st.success(
+    "**Fidelity of this algorithm.** It implements the official 2024-25 NSPF Manual "
+    "(v8-15-2025) — the same indicator weights (Table 10), Point Attribution Tables "
+    "(Tables 11–19), truncation rule (§1.3), and star cut scores (Table 2) — and computes "
+    "the Total Index Score exactly as the manual defines it (§1.2.2). It reproduces the "
+    "published 2024-25 rating for Carroll M Johnston STEM Academy exactly "
+    "(Total Index 51.5 → ★★★). This is a transparent calculation — no AI, no hidden logic — "
+    "not a prediction, and not an official NDE rating."
+)
+
+st.markdown(f"**Methodology:** [open the full methodology document]({METHODOLOGY_URL}) "
+            "· or read it on this page below.")
+with st.expander("How the rating is calculated — full methodology"):
+    try:
+        st.markdown((Path(__file__).parent / "METHODOLOGY.md").read_text())
+    except Exception:
+        st.markdown(f"The full methodology is available here: [{METHODOLOGY_URL}]({METHODOLOGY_URL})")
 
 # ---- Sidebar: framework reference ----
 st.sidebar.header("Framework reference")
