@@ -1,4 +1,3 @@
-[METHODOLOGY (1).md](https://github.com/user-attachments/files/29070084/METHODOLOGY.1.md)
 ## How the middle school star rating is calculated
 
 This estimator reproduces the scoring method in the **2024-25 NSPF Manual
