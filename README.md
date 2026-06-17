@@ -1,20 +1,41 @@
-[README (1).md](https://github.com/user-attachments/files/29065741/README.1.md)
+[README (2).md](https://github.com/user-attachments/files/29069182/README.2.md)
 # NSPF Middle School Star-Rating Estimator
 
-A small web app that estimates a Nevada middle school's **NSPF index (0–100)** and
-**star rating (1–5)** from its indicator values. It is the deterministic scoring core
-of a larger prediction pipeline: forecast the indicator inputs, then run them through
-this engine.
+A web app that estimates a Nevada middle school's **NSPF index (0–100)** and
+**star rating (1–5)** from its measure values. It implements the **2024-25 NSPF
+Manual (version 8-15-2025)** published by the NDE Office of Assessment, Data, and
+Accountability Management.
 
-> ⚠️ **Read this first.**
-> Every weight, scoring rule, and star cut score in this app is an **illustrative
-> placeholder**. Before relying on any result, replace them (in the sidebar, or in
-> `nspf_middle_school.py`) with the official values from the **NDE NSPF technical
-> guide** for your target year.
->
-> **Never enter individual student data.** Use only aggregate, school-level numbers
-> (proficiency rates, growth percentiles, absenteeism %). This keeps you clear of
-> FERPA concerns — especially important once the app is on a public URL.
+> This is an estimate to support planning and self-assessment — not an official
+> NDE rating. **Enter only aggregate, school-level numbers** (proficiency rates,
+> growth percentiles, absenteeism %), never individual student records. This
+> matters especially once the app is deployed at a public URL.
+
+---
+
+## What it implements (faithful to the manual)
+
+| Component | Weight | Source |
+|---|---|---|
+| Academic Achievement — pooled proficiency | 25 | Table 10, PAT Table 11 |
+| Growth — Math/ELA MGP (10 each), Math/ELA AGP (5 each) | 30 | Tables 12–13 |
+| English Learner Progress — WIDA AGP | 10 | Table 14 |
+| Closing Opportunity Gaps — Math + ELA | 20 | Table 15 |
+| Student Engagement — absenteeism (10), ALP (2), 8th-grade credits (3) | 15 | Tables 16, 18, 19 |
+
+- **Index** = points earned ÷ points possible × 100 (manual §1.2.2).
+- **Rates are truncated to the tenth** before table lookup (§1.3).
+- **Star cuts** (Table 2): 5★ ≥80 · 4★ 70–79 · 3★ 50–69 · 2★ 29–49 · 1★ <29.
+- A school missing any rating-required measure (pooled proficiency and all four
+  growth measures) is flagged **Not Rated**, per §1.2.
+
+### Deliberately out of scope (need student-level data)
+
+n-size sufficiency and multi-year pooling (§1.2.1, §3.2); CSI/TSI/ATSI school
+designations (§7); assessment participation penalties (§6); and the Chronic
+Absenteeism Reduction PAT (Table 17), whose "reduction rate" formula is not given
+explicitly in the manual. The Chronic Absenteeism Incentive Point (§5.1.5.1) **is**
+implemented and activates only when a prior-year rate is supplied.
 
 ---
 
@@ -23,7 +44,7 @@ this engine.
 | File | Purpose |
 |------|---------|
 | `app.py` | Streamlit user interface |
-| `nspf_middle_school.py` | The scoring engine (no UI, importable) |
+| `nspf_middle_school.py` | The scoring engine (Point Attribution Tables, no UI) |
 | `requirements.txt` | Python dependencies |
 | `.gitignore` | Standard Python/Streamlit ignores |
 
@@ -31,45 +52,28 @@ this engine.
 
 ## Run it on your own computer
 
-1. Install Python 3 (from python.org) if you don't have it.
-2. In a terminal, from this folder:
-   ```bash
-   pip install -r requirements.txt
-   streamlit run app.py
-   ```
-3. It opens in your browser at `http://localhost:8501`.
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+It opens at `http://localhost:8501`.
+
+## Run it via GitHub (free public app)
+
+1. Upload these files to a GitHub repository (at the repo root).
+2. Go to **share.streamlit.io**, sign in with GitHub, click **New app**.
+3. Choose your repo, branch `main`, main file **`app.py`**, and **Deploy**.
 
 ---
 
-## Run it "in GitHub" (free public app via Streamlit Community Cloud)
+## Validation gate
 
-1. Create a new repository on GitHub and upload these files (or push this folder).
-2. Go to **share.streamlit.io**, sign in with GitHub, and click **New app**.
-3. Pick your repository, branch `main`, and set the main file to **`app.py`**.
-4. Click **Deploy**. After a minute you get a public URL anyone can use — no
-   install required on their end.
+Even a faithful implementation should be checked against reality before anyone
+relies on it. Pull several real Nevada middle schools' published 2024-25 measure
+values, enter them, and confirm the app reproduces each school's published star
+rating. Record the result (e.g., "matched 20 of 20") — that is the strongest
+evidence of trustworthiness.
 
-Streamlit Cloud reads `requirements.txt` automatically to build the environment.
-
----
-
-## Before you trust the output: the validation gate
-
-The scoring formula is only as right as the numbers you put in the config. To check it:
-
-1. Pull last year's **actual published indicator values** for several real Nevada
-   middle schools from the Nevada Report Card / accountability portal.
-2. Enter them in the app.
-3. Confirm the app reproduces each school's **published star rating**.
-
-If it doesn't match, your weights, rubrics, or cut scores are off — fix those before
-building anything on top.
-
----
-
-## What's next in the pipeline
-
-- **Input forecasting:** map interim assessment + attendance-to-date data into
-  projected end-of-year indicator values.
-- **Monte Carlo:** turn noisy input ranges into a probability of landing in each
-  star band, rather than a single point estimate.
+If a school does not match, likely culprits are the pooled-proficiency inputs
+(the manual combines Math + ELA + Science into one rate) or a measure entered on
+a different basis than the manual defines.
