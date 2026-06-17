@@ -1,6 +1,8 @@
 """
 Streamlit UI for the NSPF Middle School estimator.
-Implements the 2024-25 NSPF Manual (version 8-15-2025).
+Implements the 2024-25 NSPF Manual (v8-15-2025). Inputs are labeled and grouped
+to match the line items on an official NSPF school rating report, so values read
+off a report map directly onto this tool.
 
 Run locally:   streamlit run app.py
 Deploy:        push to GitHub, then deploy on Streamlit Community Cloud (main file: app.py)
@@ -14,26 +16,24 @@ from nspf_middle_school import (
 st.set_page_config(page_title="NSPF Middle School Estimator", layout="wide")
 
 st.title("NSPF Middle School Star-Rating Estimator")
-st.caption("Implements the 2024-25 Nevada School Performance Framework Manual (v8-15-2025)")
+st.caption("Implements the 2024-25 NSPF Manual (v8-15-2025). Labels match the school rating report.")
 
 st.info(
-    "This estimate uses the official 2024-25 middle school weights, Point Attribution "
-    "Tables, and star cut scores from the NDE manual. **Enter only aggregate, school-level "
-    "numbers** - never individual student data. This is an estimate, not an official NDE rating."
+    "Enter the rates from a school rating report's front page. Each field below is named "
+    "exactly as it appears on the report. **Use only aggregate, school-level numbers** — "
+    "never individual student data. This is an estimate, not an official NDE rating."
 )
 
-# ----------------------------------------------------------------------
-# Sidebar: framework reference (read-only) + scope notes
-# ----------------------------------------------------------------------
+# ---- Sidebar: framework reference ----
 st.sidebar.header("Framework reference")
-st.sidebar.caption("2024-25 manual, Table 10 indicator weights:")
+st.sidebar.caption("2024-25 indicator weights (Table 10):")
 for comp in COMPONENT_ORDER:
     st.sidebar.write(f"- {comp}: **{INDICATOR_WEIGHTS[comp]}** pts")
 st.sidebar.caption("Star cuts (Table 2): 5★ ≥80 · 4★ 70–79 · 3★ 50–69 · 2★ 29–49 · 1★ <29")
 st.sidebar.divider()
 st.sidebar.caption(
     "Out of scope (need student-level data): n-size pooling, CSI/TSI/ATSI designations, "
-    "participation penalties, and the Chronic Absenteeism Reduction PAT."
+    "and assessment participation penalties."
 )
 
 
@@ -49,14 +49,14 @@ def indicator(label, default, minv=0.0, maxv=100.0, step=1.0, help=None, key=Non
     return val if reported else None
 
 
-st.subheader("Enter this school's measure values")
-st.caption("Uncheck 'Reported' for any measure suppressed by minimum-N rules.")
+st.subheader("Enter the school's reported rates")
+st.caption("Uncheck 'Reported' for any measure suppressed by minimum-N rules (shown as '-' on a report).")
 
 left, right = st.columns(2)
 
 with left:
-    st.markdown("**Academic Achievement** — pooled proficiency (Table 11)")
-    mode = st.radio("Pooled proficiency input", ["Enter rate directly", "Compute from counts"],
+    st.markdown("### Academic Achievement  ·  /25")
+    mode = st.radio("Pooled proficiency", ["Enter rate directly", "Compute from counts"],
                     horizontal=True, label_visibility="collapsed")
     if mode == "Compute from counts":
         st.caption("Pooled = (Math + ELA + Science proficient) ÷ (assessed) × 100")
@@ -71,37 +71,38 @@ with left:
             sa = st.number_input("Science assessed", min_value=0, value=0, step=1)
         denom = ma + ea + sa
         pooled = round((mp + ep + sp) / denom * 100, 1) if denom else 0.0
-        st.metric("Computed pooled proficiency", f"{pooled}%")
+        st.metric("Pooled Proficiency", f"{pooled}%")
         rep = st.checkbox("Reported", value=denom > 0, key="rep_pooled_counts")
         pooled_proficiency = pooled if rep else None
     else:
-        pooled_proficiency = indicator("Pooled proficiency rate %", 38, key="pooled")
+        pooled_proficiency = indicator("Pooled Proficiency", 26.2, step=0.1, key="pooled")
 
-    st.markdown("**Student Growth** (Tables 12–13)")
-    math_mgp = indicator("Math median growth percentile", 47, minv=1, maxv=99, key="mmgp")
-    ela_mgp = indicator("ELA median growth percentile", 52, minv=1, maxv=99, key="emgp")
-    math_agp = indicator("Math % meeting adequate growth", 38, key="magp")
-    ela_agp = indicator("ELA % meeting adequate growth", 44, key="eagp")
+    st.markdown("### Student Growth  ·  /30")
+    math_mgp = indicator("Math MGP (school median)", 56, minv=1, maxv=99, key="mmgp")
+    ela_mgp = indicator("ELA MGP (school median)", 51, minv=1, maxv=99, key="emgp")
+    math_agp = indicator("Met Math AGP Target %", 21, step=0.1, key="magp")
+    ela_agp = indicator("Met ELA AGP Target %", 39.9, step=0.1, key="eagp")
 
-    st.markdown("**English Learner Progress** (Table 14)")
-    wida = indicator("% of ELs meeting WIDA AGP", 30,
+    st.markdown("### English Language Proficiency  ·  /10")
+    wida = indicator("Met EL AGP Target %", 37.5, step=0.1,
                     help="Uncheck Reported if too few ELs to report.", key="wida")
 
 with right:
-    st.markdown("**Closing Opportunity Gaps** (Table 15)")
-    math_gap = indicator("Math: % of prior non-proficient meeting AGP", 16, key="mgap")
-    ela_gap = indicator("ELA: % of prior non-proficient meeting AGP", 24, key="egap")
+    st.markdown("### Closing Opportunity Gaps  ·  /20")
+    math_gap = indicator("Prior Non-Proficient Met Math AGP Target %", 11.7, step=0.1, key="mgap")
+    ela_gap = indicator("Prior Non-Proficient Met ELA AGP Target %", 26.6, step=0.1, key="egap")
 
-    st.markdown("**Student Engagement** (Tables 16, 18, 19)")
-    absent = indicator("Chronic absenteeism % (lower is better)", 18, key="ca")
-    use_prior = st.checkbox("I have last year's absenteeism rate (enables incentive point)",
-                            value=False, key="useprior")
+    st.markdown("### Student Engagement  ·  /15")
+    absent = indicator("Chronic Absenteeism %  (lower is better)", 28.5, step=0.1, key="ca")
+    use_prior = st.checkbox("I have last year's Chronic Absenteeism rate "
+                            "(enables the reduction / incentive paths)", value=True, key="useprior")
     prior_absent = None
     if use_prior:
-        prior_absent = st.number_input("Prior-year chronic absenteeism %", min_value=0.0,
-                                       max_value=100.0, value=20.0, step=1.0, key="prior_ca")
-    alp = indicator("% of students with an Academic Learning Plan", 96, key="alp")
-    credit8 = indicator("% of 8th graders meeting NAC 389 credits", 80, key="cr8")
+        prior_absent = st.number_input("Prior-year Chronic Absenteeism %", min_value=0.0,
+                                       max_value=100.0, value=42.5, step=0.1, key="prior_ca")
+    alp = indicator("Academic Learning Plans %", 95, step=0.1,
+                   help="Reports often show '>95' — enter 95 (anything ≥95 earns full points).", key="alp")
+    credit8 = indicator("8th Grade Credit Requirements %", 81.8, step=0.1, key="cr8")
 
 inp = MiddleSchoolInputs(
     pooled_proficiency=pooled_proficiency,
@@ -115,9 +116,7 @@ inp = MiddleSchoolInputs(
 
 r = compute(inp)
 
-# ----------------------------------------------------------------------
-# Results
-# ----------------------------------------------------------------------
+# ---- Results (mirrors the report's front page) ----
 st.divider()
 st.header("Projected result")
 
@@ -125,12 +124,11 @@ if not r.rated:
     pretty = ", ".join(REQUIRED_FOR_RATING)
     st.warning(
         "**Not Rated** under NDE rules — a middle school must have all five rating-required "
-        f"measures ({pretty}) to receive a star rating. The index below is provisional, based "
-        "only on the measures entered."
+        f"measures ({pretty}). The index below is provisional, based only on what was entered."
     )
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Index", f"{r.index} / 100")
+m1.metric("Total Index Score", f"{r.index} / 100")
 m2.metric("Star rating", "★" * r.stars + "☆" * (5 - r.stars))
 if r.next_star is not None:
     m3.metric(f"Index points to {r.next_star}★", r.points_to_next)
@@ -142,17 +140,19 @@ for comp in COMPONENT_ORDER:
     if comp in r.by_component:
         c = r.by_component[comp]
         pct = (c["earned"] / c["possible"]) if c["possible"] else 0.0
-        st.write(f"**{comp}** — {c['earned']:.1f} / {c['possible']:.1f}  ({pct * 100:.0f}%)")
+        st.write(f"**{comp}** — {c['earned']:.1f} / {c['possible']:.0f}")
         st.progress(max(0.0, min(1.0, pct)))
 
-with st.expander("Measure detail"):
+with st.expander("Measure detail (matches report line items)"):
     for m in r.measures:
         if m.applies:
-            st.write(f"{m.label}: rate {m.value} → **{m.earned:.1f}** of {m.max_points:.0f} pts")
+            note = f"  — _{m.note}_" if m.note and m.note != "rate" else ""
+            st.write(f"{m.label}: rate {m.value} → **{m.earned:.1f}** / {m.max_points:.0f} pts{note}")
         else:
             st.write(f"{m.label}: _not reported_")
 
 st.caption(
     "Index = points earned ÷ points possible × 100 (manual §1.2.2). Rates are truncated to the "
-    "tenth before table lookup (§1.3). Unreported measures drop out of both totals."
+    "tenth before table lookup (§1.3). Chronic absenteeism takes the higher of the rate path "
+    "(+ incentive) or the reduction-rate path when a prior-year rate is supplied."
 )
