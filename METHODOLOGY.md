@@ -1,4 +1,3 @@
-[METHODOLOGY (2).md](https://github.com/user-attachments/files/29074412/METHODOLOGY.2.md)
 ## How the NSPF star rating is calculated
 
 This estimator reproduces the scoring method in the **2024-25 NSPF Manual
