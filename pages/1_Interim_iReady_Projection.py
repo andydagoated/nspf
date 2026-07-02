@@ -63,6 +63,37 @@ def build_pdf(level_key: str, r, projection, values: dict, engagement_measures: 
     pdf.set_text_color(0, 0, 0)
     pdf.ln(2)
 
+    pdf.set_font("Helvetica", "B", 11)
+    _line(pdf, "Getting the most from these numbers", h=6)
+    pdf.set_font("Helvetica", "I", 9)
+    _line(
+        pdf,
+        "If you're pasting this into an AI assistant for analysis, these prompts are built to "
+        "respect the confidence tags above and avoid over-trusting a projection:",
+        h=4,
+    )
+    pdf.set_font("Helvetica", "", 9)
+    _line(
+        pdf,
+        '1. "Given the confidence levels noted (high/medium/low), which 1-2 measures are most '
+        'likely driving this result, and which should I treat cautiously since they\'re '
+        'projections?"',
+        h=4,
+    )
+    _line(
+        pdf,
+        '2. "Where\'s the biggest gap between subjects or grades in these numbers that\'s worth '
+        'investigating with my team this week?"',
+        h=4,
+    )
+    _line(
+        pdf,
+        '3. "This is a mid-year projection, not an official score. What would need to be true '
+        'about my school\'s real (non-iReady) data for this projection to be misleading?"',
+        h=4,
+    )
+    pdf.ln(3)
+
     pdf.set_font("Helvetica", "", 10)
     _line(pdf, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     _line(pdf, f"School level: {level_key}")
