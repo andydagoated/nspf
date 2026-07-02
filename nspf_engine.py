@@ -26,6 +26,7 @@ and assessment participation penalties (6).
 
 from __future__ import annotations
 import math
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -398,3 +399,5 @@ if __name__ == "__main__":
         print(f"{'OK ' if good else 'FAIL'} {name}: {got} (want {want})")
 
     print("RESULT:", "ALL PASS" if ok else "FAILURES PRESENT")
+    if not ok:
+           sys.exit(1)
