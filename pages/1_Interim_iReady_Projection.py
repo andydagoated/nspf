@@ -38,7 +38,7 @@ def _line(pdf, text, h=5):
     pdf.multi_cell(0, h, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def build_pdf(level_key: str, r, projection, values: dict) -> bytes:
+def build_pdf(level_key: str, r, projection, values: dict, engagement_measures: list) -> bytes:
     """Build a one-page PDF summary of the projected result.
 
     Contains only aggregate, school-level numbers -- no student names, IDs,
@@ -90,6 +90,16 @@ def build_pdf(level_key: str, r, projection, values: dict) -> bytes:
         val_str = f"{d.value:g}%" if d.value is not None else "not available"
         included = "included" if values.get(d.key) is not None else "excluded"
         _line(pdf, f"- {d.label}: {val_str}  [{d.confidence} confidence, {included}]  ({d.note})")
+
+    if engagement_measures:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 11)
+        _line(pdf, "Student Engagement (entered manually, not derived from iReady)", h=5)
+        pdf.set_font("Helvetica", "", 10)
+        for md in engagement_measures:
+            v = values.get(md.key)
+            status = f"{v:g}%  [included]" if v is not None else "not reported  [excluded]"
+            _line(pdf, f"- {md.label}: {status}")
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 12)
@@ -246,8 +256,42 @@ st.divider()
 st.subheader("4. Projected NSPF result")
 
 level_key = st.radio("School level", list(LEVELS.keys()), index=1, horizontal=True, key="level_proj")
+spec = LEVELS[level_key]
 
-r = compute(level_key, values, prior_ca=None)
+st.markdown("**Student Engagement \u2014 enter these directly (not derived from iReady)**")
+st.caption(
+    "These measures need attendance/enrollment data this tool doesn't take. Pull them from "
+    "your SIS if you have them, or leave 'Reported' unchecked to exclude a measure."
+)
+
+engagement_measures = [m for m in spec.measures if m.component == "Student Engagement"]
+prior_ca_value = None
+
+for md in engagement_measures:
+    e1, e2 = st.columns([3, 1])
+    with e1:
+        val = st.number_input(
+            md.label, min_value=float(md.vmin), max_value=float(md.vmax),
+            value=float(md.default), step=float(md.step), help=md.help or None,
+            key=f"eng_{level_key}_{md.key}",
+        )
+    with e2:
+        st.write("")
+        reported = st.checkbox("Reported", value=False, key=f"eng_rep_{level_key}_{md.key}")
+    values[md.key] = val if reported else None
+
+    if md.is_ca and reported:
+        use_prior = st.checkbox(
+            "I have last year's Chronic Absenteeism rate (enables reduction/incentive)",
+            value=False, key=f"eng_useprior_{level_key}",
+        )
+        if use_prior:
+            prior_ca_value = st.number_input(
+                "Prior-year Chronic Absenteeism %", min_value=0.0, max_value=100.0,
+                value=float(spec.ca_default_prior), step=0.1, key=f"eng_priorca_{level_key}",
+            )
+
+r = compute(level_key, values, prior_ca=prior_ca_value)
 
 st.error(
     "PROJECTED / INTERIM \u2014 not an official NDE rating, not suitable for public reporting."
@@ -276,14 +320,13 @@ for comp, c in r.by_component.items():
     st.progress(max(0.0, min(1.0, pct)))
 
 st.caption(
-    "Student Engagement measures (chronic absenteeism, credit sufficiency, etc.) require "
-    "attendance/enrollment data this tool doesn't take, so they're excluded here \u2014 the "
-    "official calculator (main page) can include them if you have those rates."
+    "Student Engagement measures above were entered manually, not derived from iReady \u2014 "
+    "double-check they're accurate before trusting the result."
 )
 
 st.divider()
 st.subheader("5. Export")
-pdf_bytes = build_pdf(level_key, r, projection, values)
+pdf_bytes = build_pdf(level_key, r, projection, values, engagement_measures)
 st.download_button(
     "\U0001F4C4 Download results as PDF",
     data=pdf_bytes,
