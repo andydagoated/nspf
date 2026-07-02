@@ -23,11 +23,90 @@ Data handling:
 """
 
 from __future__ import annotations
+from datetime import datetime
 import pandas as pd
 import streamlit as st
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 from nspf_engine import LEVELS, compute
 from iready_ingest import CANONICAL_FIELDS, guess_mapping, apply_mapping, project_rates
+
+
+def _line(pdf, text, h=5):
+    """multi_cell that always resets the cursor to the left margin afterward."""
+    pdf.multi_cell(0, h, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+
+def build_pdf(level_key: str, r, projection, values: dict) -> bytes:
+    """Build a one-page PDF summary of the projected result.
+
+    Contains only aggregate, school-level numbers -- no student names, IDs,
+    or row-level data -- so it's safe to hand off, print, or paste into
+    another tool (including an AI assistant) for further analysis.
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    _line(pdf, "Interim iReady -> Projected NSPF Estimate", h=8)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(180, 60, 0)
+    _line(
+        pdf,
+        "PROJECTED / INTERIM -- NOT AN OFFICIAL NDE RATING. Based on an interim iReady "
+        "diagnostic, not official end-of-year SBAC results. Growth-based measures use "
+        "iReady's own growth percentile, not the state's official growth model. Not "
+        "suitable for public, board, or funder-facing reporting.",
+        h=6,
+    )
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "", 10)
+    _line(pdf, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    _line(pdf, f"School level: {level_key}")
+    _line(
+        pdf,
+        f"Students: {projection.n_students}  |  ELA rows: {projection.n_ela_rows}  |  "
+        f"Math rows: {projection.n_math_rows}",
+    )
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 13)
+    _line(pdf, f"Projected Index: {r.index} / 100    Stars: {'*' * r.stars}{'-' * (5 - r.stars)}", h=7)
+    if r.next_star is not None:
+        pdf.set_font("Helvetica", "", 10)
+        _line(pdf, f"Points to {r.next_star}-star band: {r.points_to_next}")
+    if not r.rated:
+        pdf.set_font("Helvetica", "I", 10)
+        _line(pdf, f"Not Rated (provisional) -- missing required measure(s): {', '.join(r.missing_required)}.")
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 12)
+    _line(pdf, "Measures included in this projection", h=6)
+    pdf.set_font("Helvetica", "", 10)
+    for d in projection.detail:
+        val_str = f"{d.value:g}%" if d.value is not None else "not available"
+        included = "included" if values.get(d.key) is not None else "excluded"
+        _line(pdf, f"- {d.label}: {val_str}  [{d.confidence} confidence, {included}]  ({d.note})")
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 12)
+    _line(pdf, "Indicator breakdown (measures included only)", h=6)
+    pdf.set_font("Helvetica", "", 10)
+    for comp, c in r.by_component.items():
+        _line(pdf, f"- {comp}: {c['earned']:.1f} / {c['possible']:g}")
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 9)
+    _line(
+        pdf,
+        "This document contains only aggregate, school-level statistics -- no individual "
+        "student data. Safe to share, print, or paste into other tools for further analysis.",
+    )
+
+    return bytes(pdf.output())
 
 st.set_page_config(page_title="Interim iReady -> NSPF Projection", layout="wide")
 
@@ -200,6 +279,22 @@ st.caption(
     "Student Engagement measures (chronic absenteeism, credit sufficiency, etc.) require "
     "attendance/enrollment data this tool doesn't take, so they're excluded here \u2014 the "
     "official calculator (main page) can include them if you have those rates."
+)
+
+st.divider()
+st.subheader("5. Export")
+pdf_bytes = build_pdf(level_key, r, projection, values)
+st.download_button(
+    "\U0001F4C4 Download results as PDF",
+    data=pdf_bytes,
+    file_name=f"interim_nspf_projection_{level_key.lower()}.pdf",
+    mime="application/pdf",
+)
+st.caption(
+    "This PDF contains only aggregate, school-level numbers \u2014 no student names, IDs, or "
+    "row-level data \u2014 so it's safe to share, print, or paste into another tool (including "
+    "an AI assistant) for further analysis. The PROJECTED/INTERIM disclaimer travels with the "
+    "document."
 )
 
 st.divider()
