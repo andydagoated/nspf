@@ -3,8 +3,9 @@ Streamlit UI for the NSPF Star-Rating Estimator (Elementary / Middle / High).
 Implements the 2024-25 NSPF Manual (v8-15-2025). Inputs are labeled and grouped
 to match the line items on an official NSPF school rating report.
 
-Run locally:   streamlit run app.py
-Deploy:        push to GitHub, then deploy on Streamlit Community Cloud (main file: app.py)
+Run locally:   streamlit run NSPF_Star_Rating_Estimator.py
+Deploy:        push to GitHub, then set this file as the main file in Streamlit Community
+               Cloud (Manage app -> Settings -> Main file path).
 """
 
 from pathlib import Path
