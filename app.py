@@ -28,9 +28,11 @@ st.success(
     "**Fidelity of this algorithm.** It implements the official 2024-25 NSPF Manual "
     "(v8-15-2025) for all three school levels — the same indicator weights, Point Attribution "
     "Tables, truncation rule (§1.3), and star cut scores — and computes the Total Index Score "
-    "exactly as the manual defines it (§1.2.2). It reproduces the published 2024-25 rating for "
-    "Carroll M Johnston STEM Academy (middle school) exactly (51.5 → ★★★). This is a transparent "
-    "calculation — no AI, no hidden logic — not a prediction, and not an official NDE rating."
+    "exactly as the manual defines it (§1.2.2). It reproduces published 2024-25 ratings exactly, "
+    "including every component and measure-level point value: Carroll M Johnston STEM Academy "
+    "(middle, 51.5 → ★★★) and Amplus Academy–Durango (middle, 88 → ★★★★★, including the chronic-"
+    "absenteeism incentive path). This is a transparent calculation — no AI, no hidden logic — "
+    "not a prediction, and not an official NDE rating."
 )
 st.markdown(f"**Methodology:** [open the full methodology document]({METHODOLOGY_URL}) "
             "· or read it on this page below.")
