@@ -40,9 +40,31 @@ from ixl_ingest import (
 )
 
 
+def _pdf_safe(text: str) -> str:
+    """Make text safe for fpdf2's built-in Latin-1 fonts.
+
+    Replaces the Unicode punctuation used elsewhere in the app (em dashes,
+    arrows, math symbols) with ASCII equivalents, then hard-fails nothing:
+    any remaining unsupported character becomes '?' instead of crashing
+    PDF generation.
+    """
+    replacements = {
+        "\u2014": "-", "\u2013": "-",      # em/en dash
+        "\u2192": "->", "\u2190": "<-",    # arrows
+        "\u2265": ">=", "\u2264": "<=",
+        "\u00d7": "x", "\u2248": "~=",
+        "\u2605": "*", "\u2606": "-",      # filled/empty stars
+        "\u00b7": "|", "\u2022": "-",      # middle dot, bullet
+        "\u201c": '"', "\u201d": '"', "\u2018": "'", "\u2019": "'",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
 def _line(pdf, text, h=5):
     """multi_cell that always resets the cursor to the left margin afterward."""
-    pdf.multi_cell(0, h, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(0, h, _pdf_safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def build_pdf(level_key: str, r, projection, values: dict, engagement_measures: list,
