@@ -26,9 +26,8 @@ contains student-level data -- the About tab tells the leader to treat it
 like any student record.
 
 Expected DataFrame columns (missing optional columns are simply skipped):
-  required: student_id, first_name, last_name, grade, subject ('ELA'/'MATH'),
-            probable_level (1-4)
-  optional: percentile, growth_pct, met_growth (bool), prior_level (1-4),
+  required: student_id, grade, subject ('ELA'/'MATH'), probable_level (1-4)
+  optional: first_name, last_name, percentile, growth_pct, met_growth (bool), prior_level (1-4),
             race, iep (Y/blank), ell (Y/blank), target_group (school labels
             like Blue/Purple), scale_score, points_to_level_up
 """
@@ -57,7 +56,7 @@ CTR = Alignment(horizontal="center", vertical="center")
 WRAP = Alignment(wrap_text=True, vertical="top")
 PCT = "0.0%"
 
-OPTIONAL_COLS = ["percentile", "growth_pct", "met_growth", "prior_level", "race",
+OPTIONAL_COLS = ["first_name", "last_name", "percentile", "growth_pct", "met_growth", "prior_level", "race",
                  "iep", "ell", "target_group", "scale_score", "points_to_level_up"]
 
 
@@ -222,7 +221,9 @@ def build_instructional_workbook(
                 c.alignment = CTR
             return c
         put("id", row["student_id"], center=False)
-        put("student", f"{row.get('first_name','')} {row.get('last_name','')}".strip(), center=False)
+        nm = f"{row['first_name'] if pd.notna(row['first_name']) else ''} "\
+             f"{row['last_name'] if pd.notna(row['last_name']) else ''}".strip()
+        put("student", nm if nm else row["student_id"], center=False)
         put("grade", row["grade"] if pd.notna(row["grade"]) else None)
         put("subject", row["subject"])
         if has["race"]:
