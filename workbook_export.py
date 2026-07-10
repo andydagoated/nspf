@@ -95,6 +95,8 @@ def _style_chart(chart, label_fmt):
         except (AttributeError, IndexError):
             pass
     for ax in (chart.x_axis, chart.y_axis):
+        ax.majorGridlines = None
+        ax.minorGridlines = None
         ax.txPr = _rt(850)
         if ax.title is not None:
             try:
