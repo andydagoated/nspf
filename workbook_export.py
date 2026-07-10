@@ -41,6 +41,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.chart import BarChart, Reference
 
 F = "Arial"
 BLUE = Font(name=F, size=10, color="0000FF")
@@ -70,6 +71,112 @@ def _norm(df: pd.DataFrame) -> pd.DataFrame:
                 "scale_score", "points_to_level_up", "grade"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+
+
+def _add_charts_tab(wb, df, L, start, end, S_PROF):
+    """Charts tab: live COUNTIFS tables (shown, not hidden) feeding Excel-native
+    charts. Because the tables reference the Roster, the charts update when the
+    Roster is corrected -- same live-data philosophy as the Summary."""
+    ch = wb.create_sheet("Charts")
+    ch["A1"] = "CHARTS — every chart is fed by the labeled table beside it (live from the Roster)"
+    ch["A1"].font = WHT
+    for i in range(1, 13):
+        ch.cell(row=1, column=i).fill = HFILL
+    ch.column_dimensions["A"].width = 26
+    for col in "BCDE":
+        ch.column_dimensions[col].width = 11
+
+    SUBJ = f"Roster!${L['subject']}${start}:${L['subject']}${end}"
+    LVL = f"Roster!${L['level']}${start}:${L['level']}${end}"
+    GRD = f"Roster!${L['grade']}${start}:${L['grade']}${end}"
+    TIER = f"Roster!${L['tier']}${start}:${L['tier']}${end}"
+    grades = sorted({int(g) for g in df["grade"].dropna().unique()})
+
+    # ---- Table/Chart 1: % projected proficient by grade ----
+    r0 = 3
+    ch.cell(row=r0, column=1, value="Projected % proficient").font = BOLD
+    for i, h in enumerate(["", "ELA", "MATH"], 1):
+        c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
+    rr = r0 + 2
+    for label, g in [("Pooled", None)] + [(f"Grade {g}", g) for g in grades]:
+        ch.cell(row=rr, column=1, value=label).font = BLACK
+        for col, subj in ((2, "ELA"), (3, "MATH")):
+            gbit = f",{GRD},{g}" if g is not None else ""
+            f_ = (f'=IF(COUNTIFS({SUBJ},"{subj}",{LVL},"<>"&""{gbit})=0,0,'
+                  f'COUNTIFS({SUBJ},"{subj}",{LVL},">="&{S_PROF}{gbit})/'
+                  f'COUNTIFS({SUBJ},"{subj}",{LVL},"<>"&""{gbit}))')
+            c = ch.cell(row=rr, column=col, value=f_); c.number_format = PCT; c.alignment = CTR
+        rr += 1
+    t1_end = rr - 1
+    bar1 = BarChart(); bar1.type = "col"; bar1.style = 10
+    bar1.title = "Projected % proficient by grade"
+    bar1.y_axis.numFmt = "0%"; bar1.y_axis.title = "% at/above proficient"
+    data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t1_end)
+    cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t1_end)
+    bar1.add_data(data, titles_from_data=True); bar1.set_categories(cats)
+    bar1.width = 16; bar1.height = 9
+    ch.add_chart(bar1, "G3")
+
+    # ---- Table/Chart 2: projected level distribution (stacked) ----
+    r0 = t1_end + 3
+    ch.cell(row=r0, column=1, value="Students by projected level").font = BOLD
+    for i, h in enumerate(["", "Level 1", "Level 2", "Level 3", "Level 4"], 1):
+        c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
+    rr = r0 + 2
+    for subj in ("ELA", "MATH"):
+        ch.cell(row=rr, column=1, value=subj).font = BLACK
+        for lv in (1, 2, 3, 4):
+            c = ch.cell(row=rr, column=1 + lv,
+                        value=f'=COUNTIFS({SUBJ},"{subj}",{LVL},{lv})')
+            c.alignment = CTR
+        rr += 1
+    t2_end = rr - 1
+    bar2 = BarChart(); bar2.type = "col"; bar2.grouping = "stacked"; bar2.overlap = 100
+    bar2.style = 11; bar2.title = "Projected level distribution"
+    bar2.y_axis.title = "Students"
+    data = Reference(ch, min_col=2, max_col=5, min_row=r0 + 1, max_row=t2_end)
+    cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t2_end)
+    bar2.add_data(data, titles_from_data=True); bar2.set_categories(cats)
+    bar2.width = 16; bar2.height = 9
+    ch.add_chart(bar2, "G22")
+
+    # ---- Table/Chart 3: tiers by subject (horizontal, long labels) ----
+    r0 = t2_end + 3
+    ch.cell(row=r0, column=1, value="Students by tier").font = BOLD
+    for i, h in enumerate(["", "ELA", "MATH"], 1):
+        c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
+    rr = r0 + 2
+    for t in ["1 - Intensive Intervention", "2 - Targeted Push (Bubble)", "2 - Strategic Support",
+              "3 - Core / Maintain", "4 - Extension / Enrich"]:
+        ch.cell(row=rr, column=1, value=t).font = BLACK
+        ch.cell(row=rr, column=2, value=f'=COUNTIFS({TIER},$A{rr},{SUBJ},"ELA")').alignment = CTR
+        ch.cell(row=rr, column=3, value=f'=COUNTIFS({TIER},$A{rr},{SUBJ},"MATH")').alignment = CTR
+        rr += 1
+    t3_end = rr - 1
+    bar3 = BarChart(); bar3.type = "bar"; bar3.style = 12
+    bar3.title = "Instructional tiers by subject"
+    bar3.x_axis.title = "Students"
+    data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t3_end)
+    cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t3_end)
+    bar3.add_data(data, titles_from_data=True); bar3.set_categories(cats)
+    bar3.width = 16; bar3.height = 10
+    ch.add_chart(bar3, "G41")
+
+    # ---- Reading guide ----
+    r0 = t3_end + 2
+    notes = [
+        "How to read these:",
+        "Chart 1 is the headline: where each grade stands against the proficiency bar. Grades far below pooled are where staffing follows.",
+        "Chart 2 shows composition: a tall Level 2 block is opportunity (bubble students one band from proficient); a tall Level 1 block is an intervention-capacity question.",
+        "Chart 3 is the staffing picture: how many students each tier must serve, per subject. If Tier 1 exceeds intervention capacity, the plan, not the data, is the problem.",
+    ]
+    for note in notes:
+        c = ch.cell(row=r0, column=1, value=note)
+        c.font = BOLD if note.endswith(":") else ITAL
+        c.alignment = WRAP
+        r0 += 1
 
 
 def build_instructional_workbook(
@@ -373,6 +480,8 @@ def build_instructional_workbook(
                             value=(f'=IF({nl}{r}=0,"",COUNTIFS({SUBJ},"{subj}",{RACE},$A{r},'
                                    f'{LVL},">="&{S_PROF})/{nl}{r})'))
                 p.number_format = PCT; p.alignment = CTR
+
+    _add_charts_tab(wb, df, L, start, end, S_PROF)
 
     # ---------------- Projected NSPF ----------------
     if nspf_result is not None:
