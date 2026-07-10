@@ -42,6 +42,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.label import DataLabelList
 
 F = "Arial"
 BLUE = Font(name=F, size=10, color="0000FF")
@@ -76,17 +77,18 @@ def _norm(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_charts_tab(wb, df, L, start, end, S_PROF):
-    """Charts tab: live COUNTIFS tables (shown, not hidden) feeding Excel-native
-    charts. Because the tables reference the Roster, the charts update when the
-    Roster is corrected -- same live-data philosophy as the Summary."""
+    """Charts tab: three fixed-height sections, each with its live COUNTIFS table
+    at left and its chart anchored beside it at the same row. Tables reference
+    the Roster, so charts update when the Roster is corrected."""
     ch = wb.create_sheet("Charts")
-    ch["A1"] = "CHARTS — every chart is fed by the labeled table beside it (live from the Roster)"
+    ch["A1"] = "CHARTS — each chart sits beside the live table that feeds it"
     ch["A1"].font = WHT
-    for i in range(1, 13):
+    for i in range(1, 16):
         ch.cell(row=1, column=i).fill = HFILL
     ch.column_dimensions["A"].width = 26
     for col in "BCDE":
-        ch.column_dimensions[col].width = 11
+        ch.column_dimensions[col].width = 10
+    ch.column_dimensions["F"].width = 3
 
     SUBJ = f"Roster!${L['subject']}${start}:${L['subject']}${end}"
     LVL = f"Roster!${L['level']}${start}:${L['level']}${end}"
@@ -94,8 +96,10 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     TIER = f"Roster!${L['tier']}${start}:${L['tier']}${end}"
     grades = sorted({int(g) for g in df["grade"].dropna().unique()})
 
-    # ---- Table/Chart 1: % projected proficient by grade ----
-    r0 = 3
+    SEC1, SEC2, SEC3 = 3, 22, 41   # 19-row bands; charts are ~16 rows tall
+
+    # ---- Section 1: % projected proficient by grade ----
+    r0 = SEC1
     ch.cell(row=r0, column=1, value="Projected % proficient").font = BOLD
     for i, h in enumerate(["", "ELA", "MATH"], 1):
         c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
@@ -116,11 +120,13 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t1_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t1_end)
     bar1.add_data(data, titles_from_data=True); bar1.set_categories(cats)
-    bar1.width = 16; bar1.height = 9
-    ch.add_chart(bar1, "G3")
+    bar1.dLbls = DataLabelList(); bar1.dLbls.showVal = True
+    bar1.dLbls.numFmt = "0%"; bar1.dLbls.dLblPos = "outEnd"
+    bar1.width = 15; bar1.height = 8.5
+    ch.add_chart(bar1, f"G{SEC1}")
 
-    # ---- Table/Chart 2: projected level distribution (stacked) ----
-    r0 = t1_end + 3
+    # ---- Section 2: projected level distribution (stacked) ----
+    r0 = SEC2
     ch.cell(row=r0, column=1, value="Students by projected level").font = BOLD
     for i, h in enumerate(["", "Level 1", "Level 2", "Level 3", "Level 4"], 1):
         c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
@@ -128,8 +134,7 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     for subj in ("ELA", "MATH"):
         ch.cell(row=rr, column=1, value=subj).font = BLACK
         for lv in (1, 2, 3, 4):
-            c = ch.cell(row=rr, column=1 + lv,
-                        value=f'=COUNTIFS({SUBJ},"{subj}",{LVL},{lv})')
+            c = ch.cell(row=rr, column=1 + lv, value=f'=COUNTIFS({SUBJ},"{subj}",{LVL},{lv})')
             c.alignment = CTR
         rr += 1
     t2_end = rr - 1
@@ -139,11 +144,13 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=5, min_row=r0 + 1, max_row=t2_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t2_end)
     bar2.add_data(data, titles_from_data=True); bar2.set_categories(cats)
-    bar2.width = 16; bar2.height = 9
-    ch.add_chart(bar2, "G22")
+    bar2.dLbls = DataLabelList(); bar2.dLbls.showVal = True
+    bar2.dLbls.dLblPos = "ctr"
+    bar2.width = 15; bar2.height = 8.5
+    ch.add_chart(bar2, f"G{SEC2}")
 
-    # ---- Table/Chart 3: tiers by subject (horizontal, long labels) ----
-    r0 = t2_end + 3
+    # ---- Section 3: tiers by subject (horizontal) ----
+    r0 = SEC3
     ch.cell(row=r0, column=1, value="Students by tier").font = BOLD
     for i, h in enumerate(["", "ELA", "MATH"], 1):
         c = ch.cell(row=r0 + 1, column=i, value=h); c.font = BOLD; c.fill = SFILL; c.alignment = CTR
@@ -161,18 +168,19 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t3_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t3_end)
     bar3.add_data(data, titles_from_data=True); bar3.set_categories(cats)
-    bar3.width = 16; bar3.height = 10
-    ch.add_chart(bar3, "G41")
+    bar3.dLbls = DataLabelList(); bar3.dLbls.showVal = True
+    bar3.dLbls.dLblPos = "outEnd"
+    bar3.width = 15; bar3.height = 9
+    ch.add_chart(bar3, f"G{SEC3}")
 
     # ---- Reading guide ----
-    r0 = t3_end + 2
-    notes = [
+    r0 = SEC3 + 19
+    for note in [
         "How to read these:",
         "Chart 1 is the headline: where each grade stands against the proficiency bar. Grades far below pooled are where staffing follows.",
         "Chart 2 shows composition: a tall Level 2 block is opportunity (bubble students one band from proficient); a tall Level 1 block is an intervention-capacity question.",
         "Chart 3 is the staffing picture: how many students each tier must serve, per subject. If Tier 1 exceeds intervention capacity, the plan, not the data, is the problem.",
-    ]
-    for note in notes:
+    ]:
         c = ch.cell(row=r0, column=1, value=note)
         c.font = BOLD if note.endswith(":") else ITAL
         c.alignment = WRAP
