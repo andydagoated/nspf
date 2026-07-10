@@ -43,6 +43,10 @@ from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (Paragraph, ParagraphProperties,
+                                   CharacterProperties, Font as DrawFont)
+from openpyxl.drawing.text import RichTextProperties
 
 F = "Arial"
 BLUE = Font(name=F, size=10, color="0000FF")
@@ -74,6 +78,40 @@ def _norm(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+
+def _style_chart(chart, label_fmt):
+    """Arial everywhere; data labels reduced to bare numbers (no series/category
+    names, no legend keys), small font so charts stay uncluttered."""
+    def _ppr(sz, bold=False):
+        return ParagraphProperties(defRPr=CharacterProperties(
+            latin=DrawFont(typeface="Arial"), sz=sz, b=bold))
+    def _rt(sz, bold=False):
+        return RichText(bodyPr=RichTextProperties(),
+                        p=[Paragraph(pPr=_ppr(sz, bold))])
+    if chart.title is not None:
+        try:
+            chart.title.tx.rich.p[0].pPr = _ppr(1100, True)
+        except (AttributeError, IndexError):
+            pass
+    for ax in (chart.x_axis, chart.y_axis):
+        ax.txPr = _rt(850)
+        if ax.title is not None:
+            try:
+                ax.title.tx.rich.p[0].pPr = _ppr(900)
+            except (AttributeError, IndexError):
+                pass
+    if chart.legend is not None:
+        chart.legend.txPr = _rt(850)
+    d = chart.dLbls or DataLabelList()
+    d.showVal = True
+    d.showSerName = False
+    d.showCatName = False
+    d.showLegendKey = False
+    d.showPercent = False
+    d.numFmt = label_fmt
+    d.txPr = _rt(800)
+    chart.dLbls = d
 
 
 def _add_charts_tab(wb, df, L, start, end, S_PROF):
@@ -120,8 +158,8 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t1_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t1_end)
     bar1.add_data(data, titles_from_data=True); bar1.set_categories(cats)
-    bar1.dLbls = DataLabelList(); bar1.dLbls.showVal = True
-    bar1.dLbls.numFmt = "0%"; bar1.dLbls.dLblPos = "outEnd"
+    _style_chart(bar1, "0%")
+    bar1.dLbls.dLblPos = "outEnd"
     bar1.width = 15; bar1.height = 8.5
     ch.add_chart(bar1, f"G{SEC1}")
 
@@ -144,7 +182,7 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=5, min_row=r0 + 1, max_row=t2_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t2_end)
     bar2.add_data(data, titles_from_data=True); bar2.set_categories(cats)
-    bar2.dLbls = DataLabelList(); bar2.dLbls.showVal = True
+    _style_chart(bar2, "0")
     bar2.dLbls.dLblPos = "ctr"
     bar2.width = 15; bar2.height = 8.5
     ch.add_chart(bar2, f"G{SEC2}")
@@ -168,7 +206,7 @@ def _add_charts_tab(wb, df, L, start, end, S_PROF):
     data = Reference(ch, min_col=2, max_col=3, min_row=r0 + 1, max_row=t3_end)
     cats = Reference(ch, min_col=1, min_row=r0 + 2, max_row=t3_end)
     bar3.add_data(data, titles_from_data=True); bar3.set_categories(cats)
-    bar3.dLbls = DataLabelList(); bar3.dLbls.showVal = True
+    _style_chart(bar3, "0")
     bar3.dLbls.dLblPos = "outEnd"
     bar3.width = 15; bar3.height = 9
     ch.add_chart(bar3, f"G{SEC3}")
