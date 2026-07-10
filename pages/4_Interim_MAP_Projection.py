@@ -32,6 +32,7 @@ from fpdf.enums import XPos, YPos
 
 from nspf_engine import LEVELS, compute
 from map_ingest import CANONICAL_FIELDS, guess_mapping, apply_mapping, project_rates
+from workbook_export import build_instructional_workbook
 
 
 def _pdf_safe(text: str) -> str:
@@ -298,7 +299,7 @@ if mapping.get("projected_prof") is None and mapping.get("percentile") is not No
 # ---------------------------------------------------------------------
 canonical_df = apply_mapping(raw_df, mapping)
 projection = project_rates(canonical_df, percentile_cut=percentile_cut)
-del canonical_df, raw_df  # done with per-student data for this run
+del raw_df  # canonical_df is kept in memory until the workbook export below, then discarded
 
 st.divider()
 st.subheader("3. Projected rates")
@@ -424,6 +425,39 @@ st.caption(
     "row-level data \u2014 so it's safe to share, print, or paste into another tool (including "
     "an AI assistant) for further analysis. The PROJECTED/INTERIM disclaimer travels with the "
     "document."
+)
+
+st.divider()
+st.subheader("6. Export instructional workbook (student-level)")
+st.caption(
+    "A multi-tab Excel workbook built from this upload: a filterable Roster with tiers, "
+    "bubble/GAP/growth flags and priorities, a live Summary (aggregates only \u2014 the "
+    "shareable tab), this Projected NSPF snapshot, and a Data Quality tab. Generated in "
+    "memory only \u2014 nothing is stored server-side. The file you download contains "
+    "student-level data: treat it like any student record."
+)
+
+export_df = canonical_df.rename(columns={
+    "projected_prof": "probable_level",
+    "cgp": "growth_pct",
+    "prior_level_num": "prior_level",
+})
+wb_bytes = build_instructional_workbook(
+    export_df,
+    school_name=st.text_input("School name for the workbook header", value="School",
+                              key="wb_school_map"),
+    platform="MAP Growth",
+    term=projection.term_used or "",
+    nspf_result=r,
+    nspf_rates={k: v for k, v in values.items()},
+    level_key=level_key,
+)
+del canonical_df, export_df  # per-student data discarded now that the bytes exist
+st.download_button(
+    "\U0001F4D3 Download instructional workbook (.xlsx)",
+    data=wb_bytes,
+    file_name=f"instructional_workbook_{level_key.lower()}_map.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 st.divider()
