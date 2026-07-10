@@ -52,6 +52,8 @@ import pandas as pd
 CANONICAL_FIELDS = {
     "student_id":         {"required": True,  "label": "Student ID (any unique identifier)"},
     "subject":            {"required": True,  "label": "Course / Subject (Reading, Mathematics, ...)"},
+    "first_name":         {"required": False, "label": "First name (for the workbook export)"},
+    "last_name":          {"required": False, "label": "Last name (for the workbook export)"},
     "grade":              {"required": False, "label": "Grade level"},
     "term":               {"required": False, "label": "Term (e.g. 'Winter 2026-2027')"},
     "projected_prof":     {"required": False, "label": "Projected Proficiency Level (linking study)"},
@@ -68,6 +70,8 @@ COLUMN_ALIASES = {
     "student_id": ["studentid", "student id", "student_id", "state student id",
                    "student state id", "id"],
     "subject": ["course", "subject", "measurementscale", "discipline"],
+    "first_name": ["studentfirstname", "student first name", "first name", "firstname"],
+    "last_name": ["studentlastname", "student last name", "last name", "lastname"],
     "grade": ["grade", "student grade", "tests grade"],
     "term": ["termname", "term name", "term", "term tested", "termtested"],
     "projected_prof": ["projectedproficiencylevel1", "projected proficiency level 1",
