@@ -123,6 +123,7 @@ class ProjectedRate:
     n: int
     confidence: str          # "high" | "medium" | "low"
     note: str = ""
+    formula: str = ""        # human-readable arithmetic shown in the "Show the math" expander
 
 
 @dataclass
@@ -134,38 +135,45 @@ class ProjectionResult:
     n_math_rows: int
 
 
-def _pct_meeting(sub: pd.DataFrame) -> tuple[Optional[float], int]:
+def _pct_meeting(sub: pd.DataFrame) -> tuple[Optional[float], int, str]:
     valid = sub["probable_level_num"].dropna()
     n = len(valid)
     if n == 0:
-        return None, 0
-    return round((valid >= 3).mean() * 100.0, 1), n
+        return None, 0, "no rows with a Probable SBAC Level"
+    num = int((valid >= 3).sum())
+    val = round(num / n * 100.0, 1)
+    return val, n, f"{num} of {n} records projected at SBAC Level 3-4  =  {num}/{n} x 100  =  {val}%"
 
 
-def _median_growth(sub: pd.DataFrame) -> tuple[Optional[float], int]:
+def _median_growth(sub: pd.DataFrame) -> tuple[Optional[float], int, str]:
     valid = sub["growth_percentile"].dropna()
     n = len(valid)
     if n == 0:
-        return None, 0
-    return round(float(valid.median()), 1), n
+        return None, 0, "no rows with an iReady growth percentile"
+    val = round(float(valid.median()), 1)
+    return val, n, f"median of {n} iReady growth percentiles  =  {val}"
 
 
-def _pct_agp_met(sub: pd.DataFrame) -> tuple[Optional[float], int]:
+def _pct_agp_met(sub: pd.DataFrame) -> tuple[Optional[float], int, str]:
     valid = sub["agp_met"].dropna()
     n = len(valid)
     if n == 0:
-        return None, 0
-    return round(valid.mean() * 100.0, 1), n
+        return None, 0, "no rows with an AGP target-met flag"
+    num = int(valid.sum())
+    val = round(num / n * 100.0, 1)
+    return val, n, f"{num} of {n} met the AGP target  =  {num}/{n} x 100  =  {val}%"
 
 
-def _pct_gap_met(sub: pd.DataFrame) -> tuple[Optional[float], int]:
+def _pct_gap_met(sub: pd.DataFrame) -> tuple[Optional[float], int, str]:
     """Among students who were NOT proficient last year, % who met this year's AGP target."""
     gap_pop = sub[(sub["prior_level_num"].notna()) & (sub["prior_level_num"] < 3)]
     valid = gap_pop["agp_met"].dropna()
     n = len(valid)
     if n == 0:
-        return None, 0
-    return round(valid.mean() * 100.0, 1), n
+        return None, 0, "no prior non-proficient students with an AGP flag"
+    num = int(valid.sum())
+    val = round(num / n * 100.0, 1)
+    return val, n, f"{num} of {n} prior non-proficient students met the AGP target  =  {num}/{n} x 100  =  {val}%"
 
 
 def project_rates(df: pd.DataFrame) -> ProjectionResult:
@@ -179,35 +187,35 @@ def project_rates(df: pd.DataFrame) -> ProjectionResult:
     math = df[df["subject"] == "MATH"]
 
     all_rows = df[df["subject"].isin(["ELA", "MATH"])]
-    pooled_val, pooled_n = _pct_meeting(all_rows)
+    pooled_val, pooled_n, pooled_f = _pct_meeting(all_rows)
 
-    ela_mgp_val, ela_mgp_n = _median_growth(ela)
-    math_mgp_val, math_mgp_n = _median_growth(math)
+    ela_mgp_val, ela_mgp_n, ela_mgp_f = _median_growth(ela)
+    math_mgp_val, math_mgp_n, math_mgp_f = _median_growth(math)
 
-    ela_agp_val, ela_agp_n = _pct_agp_met(ela)
-    math_agp_val, math_agp_n = _pct_agp_met(math)
+    ela_agp_val, ela_agp_n, ela_agp_f = _pct_agp_met(ela)
+    math_agp_val, math_agp_n, math_agp_f = _pct_agp_met(math)
 
-    ela_gap_val, ela_gap_n = _pct_gap_met(ela)
-    math_gap_val, math_gap_n = _pct_gap_met(math)
+    ela_gap_val, ela_gap_n, ela_gap_f = _pct_gap_met(ela)
+    math_gap_val, math_gap_n, math_gap_f = _pct_gap_met(math)
 
     def note_for(n, min_n=MIN_N):
         return f"n={n} — below usual minimum-N; treat as directional only" if 0 < n < min_n else f"n={n}"
 
     detail = [
         ProjectedRate("pooled_proficiency", "Pooled Proficiency (ELA+Math)", pooled_val, pooled_n,
-                      "high", note_for(pooled_n)),
+                      "high", note_for(pooled_n), pooled_f),
         ProjectedRate("math_mgp", "Math MGP (iReady growth %, not state SGP)", math_mgp_val, math_mgp_n,
-                      "low", note_for(math_mgp_n)),
+                      "low", note_for(math_mgp_n), math_mgp_f),
         ProjectedRate("ela_mgp", "ELA MGP (iReady growth %, not state SGP)", ela_mgp_val, ela_mgp_n,
-                      "low", note_for(ela_mgp_n)),
+                      "low", note_for(ela_mgp_n), ela_mgp_f),
         ProjectedRate("math_agp", "Met Math AGP Target", math_agp_val, math_agp_n,
-                      "medium", note_for(math_agp_n)),
+                      "medium", note_for(math_agp_n), math_agp_f),
         ProjectedRate("ela_agp", "Met ELA AGP Target", ela_agp_val, ela_agp_n,
-                      "medium", note_for(ela_agp_n)),
+                      "medium", note_for(ela_agp_n), ela_agp_f),
         ProjectedRate("math_gap", "Prior Non-Proficient Met Math AGP Target", math_gap_val, math_gap_n,
-                      "medium", note_for(math_gap_n)),
+                      "medium", note_for(math_gap_n), math_gap_f),
         ProjectedRate("ela_gap", "Prior Non-Proficient Met ELA AGP Target", ela_gap_val, ela_gap_n,
-                      "medium", note_for(ela_gap_n)),
+                      "medium", note_for(ela_gap_n), ela_gap_f),
     ]
 
     rates = {d.key: d.value for d in detail}
@@ -242,3 +250,4 @@ if __name__ == "__main__":
     print(f"\nStudents: {result.n_students}  ELA rows: {result.n_ela_rows}  Math rows: {result.n_math_rows}\n")
     for d in result.detail:
         print(f"  [{d.confidence:6}] {d.label:45} = {d.value}  ({d.note})")
+        print(f"           math: {d.formula}")
