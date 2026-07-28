@@ -129,6 +129,15 @@ GLOSSARY = {
          "share of them grew enough to be on track to proficiency?",
          "These students have the steepest targets in the building \u2014 this indicator "
          "measures whether a school accelerates its struggling students."),
+        ("iReady growth percentile vs Nevada SGP", "why interim growth is an estimate",
+         "Nevada's SGP ranks a student against Nevada peers with a similar state-test "
+         "history. iReady's growth percentile ranks against iReady's national norm on the "
+         "diagnostic. This app takes the median of iReady's percentiles as a stand-in for "
+         "the state's MGP: the median math is identical, but the comparison group and the "
+         "test are different.",
+         "It is why the projected growth line is low confidence and labeled an estimate of "
+         "MGP, not the state's MGP. The real state number does not exist until NDE runs its "
+         "model after the year ends."),
         ("ELPA / WIDA", "English Language Proficiency indicator",
          "The share of English Learners meeting their growth targets on WIDA, the state's "
          "English language proficiency assessment.",
