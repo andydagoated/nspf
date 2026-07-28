@@ -175,11 +175,12 @@ st.set_page_config(page_title="Interim iReady -> NSPF Projection", layout="wide"
 st.title("Interim iReady \u2192 Projected NSPF Estimate")
 
 st.warning(
-    "**This is a projection, not an official NSPF score.** It's built from an interim "
-    "iReady diagnostic (BOY/MOY), not official end-of-year SBAC results. Growth-based "
-    "measures (MGP) use iReady's own growth percentile, which is not the state's official "
-    "growth model. Use this for a mid-year directional check-in \u2014 not for public, board, "
-    "or funder-facing reporting."
+    "**This is a projection, not an official NSPF score.** The proficiency side rests on "
+    "iReady's Probable SBAC Level, a research-based prediction of the SBAC result that "
+    "Curriculum Associates reports as accurate to within about a point for the winter "
+    "sample. The growth side (MGP) is softer: it substitutes iReady's own growth "
+    "percentile, which is not the state's official growth model. Use this for a mid-year "
+    "directional check-in, not for public, board, or funder-facing reporting."
 )
 
 st.caption(
@@ -376,6 +377,91 @@ st.caption(
     "Student Engagement measures above were entered manually, not derived from iReady \u2014 "
     "double-check they're accurate before trusting the result."
 )
+
+st.divider()
+st.subheader("How much of this rating is firm?")
+st.caption(
+    "Not every point is equally certain. This splits the projected index by how much "
+    "confidence we have in the input behind it, so you can see which part of the star is "
+    "solid and which part is a softer estimate."
+)
+
+STAR = "\u2605"
+proj_conf = {d.key: d.confidence for d in projection.detail}
+_tier_label = {
+    "high": "High confidence: validated proficiency prediction",
+    "medium": "Medium confidence: growth-target (AGP) flags",
+    "low": "Low confidence: iReady growth-percentile proxy for state MGP",
+    "manual": "Entered manually: not derived from iReady",
+}
+_buckets = {"high": [0.0, 0.0], "medium": [0.0, 0.0], "low": [0.0, 0.0], "manual": [0.0, 0.0]}
+for m in r.measures:
+    if not m.applies:
+        continue
+    tier = proj_conf.get(m.key, "manual")
+    _buckets[tier][0] += m.earned
+    _buckets[tier][1] += m.max_points
+
+_incl_possible = sum(b[1] for b in _buckets.values()) or 1.0
+for tier in ["high", "medium", "low", "manual"]:
+    earned, possible = _buckets[tier]
+    if possible == 0:
+        continue
+    share = possible / _incl_possible * 100
+    st.markdown(
+        f"- **{_tier_label[tier]}**: {earned:.1f} / {possible:g} points "
+        f"({share:.0f}% of the projected index)"
+    )
+
+st.divider()
+st.subheader("Does the growth estimate change your star?")
+
+_low_keys = [d.key for d in projection.detail
+             if d.confidence == "low" and values.get(d.key) is not None]
+
+if not _low_keys:
+    st.info(
+        "No iReady growth-percentile (MGP) inputs are in this projection, so there is "
+        "nothing to stress-test here."
+    )
+else:
+    st.caption(
+        "The MGP measures are the least certain input, because they use iReady's growth "
+        "percentile as a stand-in for the state's official growth model. This shifts only "
+        "those MGP values up and down by the band below and re-scores the rating. "
+        "Proficiency and AGP are held fixed."
+    )
+    _band = st.slider(
+        "Growth uncertainty band (percentile points)",
+        min_value=0, max_value=25, value=10, step=1, key=f"mgp_band_{level_key}",
+    )
+
+    def _score_with_shift(delta):
+        v = dict(values)
+        for k in _low_keys:
+            v[k] = max(1.0, min(99.0, values[k] + delta))
+        return compute(level_key, v, prior_ca=prior_ca_value)
+
+    _low_r = _score_with_shift(-_band)
+    _high_r = _score_with_shift(+_band)
+
+    gc1, gc2, gc3 = st.columns(3)
+    gc1.metric("Conservative", f"{STAR * _low_r.stars} ({_low_r.index})")
+    gc2.metric("Reported", f"{STAR * r.stars} ({r.index})")
+    gc3.metric("Optimistic", f"{STAR * _high_r.stars} ({_high_r.index})")
+
+    _stars_seen = {_low_r.stars, r.stars, _high_r.stars}
+    if len(_stars_seen) == 1:
+        st.success(
+            f"Your {r.stars}-star rating holds across the entire band. The softness of the "
+            "growth proxy does not change the result, so you can trust the star here."
+        )
+    else:
+        st.warning(
+            f"Your rating swings from {min(_stars_seen)} to {max(_stars_seen)} stars across "
+            "the band. The star hinges on the least certain input, so treat growth as the swing "
+            "factor until you have official growth data."
+        )
 
 st.divider()
 st.subheader("How every number was calculated")
