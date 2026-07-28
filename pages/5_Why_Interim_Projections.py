@@ -101,11 +101,13 @@ st.markdown(
     """
 Be equally clear-eyed about the quieter failure modes:
 
-- **It is not a prediction with known accuracy.** The projection assumes interim results
-  translate to end-of-year state results the way the platform's linking study (or proxy
-  measure) says they do. Linking studies are decent on average and wrong for individual
-  schools in individual years \u2014 especially when winter-to-spring instruction, testing
-  conditions, or student rosters shift.
+- **Even a validated prediction can miss for your school.** Where a platform publishes a
+  linking study (iReady's Probable SBAC Level is one, accurate to about a point on
+  average), the projection still assumes your students follow that average. Averages are
+  decent across thousands of schools and wrong for an individual school in an individual
+  year, especially when winter-to-spring instruction, testing conditions, or student
+  rosters shift. Where no linking study exists (IXL), the bridge is the app's own proxy,
+  which is softer still.
 - **The growth measures are the weakest link.** The state's MGP comes from its official
   student growth percentile model. No interim platform reproduces that model; the pages
   substitute the platform's own growth metric and tag it **low confidence**. Treat
