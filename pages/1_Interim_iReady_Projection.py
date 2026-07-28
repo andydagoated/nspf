@@ -298,7 +298,8 @@ for d in projection.detail:
             reported = st.checkbox("Include in projection", value=(d.n >= 1), key=f"rep_{d.key}")
     with c3:
         if d.value is not None:
-            st.metric("Rate", f"{d.value:g}%", help=d.note)
+            tip = f"**How this was calculated**\n\n{d.formula}\n\n_{d.note}_" if d.formula else d.note
+            st.metric("Rate", f"{d.value:g}%", help=tip)
     values[d.key] = d.value if (d.value is not None and reported) else None
 
 # ---------------------------------------------------------------------
