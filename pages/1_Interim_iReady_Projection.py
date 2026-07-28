@@ -378,6 +378,41 @@ st.caption(
 )
 
 st.divider()
+st.subheader("How every number was calculated")
+st.caption(
+    "The full trail for each measure: how your iReady upload became a rate, and how "
+    "that rate became NSPF points. Points come from the official 2024-25 manual's Point "
+    "Attribution Table for each measure. Nothing here is a black box."
+)
+
+proj_by_key = {d.key: d for d in projection.detail}
+
+for m in r.measures:
+    if not m.applies:
+        st.markdown(f"**{m.label}** - _excluded (not available from this upload)_")
+        continue
+    st.markdown(f"**{m.label}**")
+    d = proj_by_key.get(m.key)
+    if d is not None and d.formula:
+        st.markdown(f"- Upload to rate: {d.formula}")
+        st.caption(CONF_BADGE[d.confidence])
+    else:
+        st.markdown("- Source: entered manually (not derived from iReady)")
+    pts_note = f"  ({m.note})" if m.note and m.note != "rate" else ""
+    st.markdown(
+        f"- Rate to points: {m.value:g} looked up in the manual's table "
+        f"= **{m.earned:.1f} / {m.max_points:g} points**{pts_note}"
+    )
+
+_included = [m for m in r.measures if m.applies]
+_earned = sum(m.earned for m in _included)
+_possible = sum(m.max_points for m in _included)
+st.markdown(
+    f"**Index:** {_earned:.1f} earned / {_possible:g} possible x 100 "
+    f"= **{r.index} / 100**  ({r.stars}-star band)"
+)
+
+st.divider()
 st.subheader("5. Export")
 pdf_bytes = build_pdf(level_key, r, projection, values, engagement_measures)
 st.download_button(
